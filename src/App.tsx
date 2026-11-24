@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Square, Timer, BarChart3, Settings, Download, ArrowLeft, Video, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Play, Pause, Square, Timer, BarChart3, Settings, Download, ArrowLeft, Video } from 'lucide-react';
+import { FaceDetector, FilesetResolver } from '@mediapipe/tasks-vision';
 
 interface StudySession {
   id: string;
@@ -58,18 +59,27 @@ export default function App() {
   // Camera & AI Presence State
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState(false);
+  const [aiReady, setAiReady] = useState(false);
+  const [faceDetected, setFaceDetected] = useState(true);
+  const [awayCountdown, setAwayCountdown] = useState<number | null>(null);
+  const [pauseReason, setPauseReason] = useState<'auto' | 'manual'>('auto');
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const prevFrameRef = useRef<Uint8ClampedArray | null>(null);
-  const inactivityTimerRef = useRef<number>(0);
-  const motionCheckIntervalRef = useRef<number | null>(null);
+  const faceDetectorRef = useRef<FaceDetector | null>(null);
+  const detectionIntervalRef = useRef<number | null>(null);
+  const lastSeenAtRef = useRef<number>(Date.now());
+  const lastVideoTimeRef = useRef<number>(0);
+  const returnDetectionsRef = useRef<number>(0);
 
   const currentScreenRef = useRef(currentScreen);
   currentScreenRef.current = currentScreen;
 
   const awayTimeoutRef = useRef(awayTimeout);
   awayTimeoutRef.current = awayTimeout;
+
+  const pauseReasonRef = useRef(pauseReason);
+  pauseReasonRef.current = pauseReason;
 
   // Toast notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -123,9 +133,20 @@ export default function App() {
     };
   }, [currentScreen]);
 
-  // Camera & AI Motion Detection setup when entering active screen
+  // Reset grace timer whenever returning to active screen
   useEffect(() => {
-    if (currentScreen === 'active' || currentScreen === 'paused') {
+    if (currentScreen === 'active') {
+      lastSeenAtRef.current = Date.now();
+      returnDetectionsRef.current = 0;
+      setAwayCountdown(null);
+    }
+  }, [currentScreen]);
+
+  // Camera & AI Face Detection lifecycle (persists across active <-> paused)
+  const isSessionRunning = currentScreen === 'active' || currentScreen === 'paused';
+
+  useEffect(() => {
+    if (isSessionRunning) {
       startCamera();
     } else {
       stopCamera();
@@ -133,22 +154,78 @@ export default function App() {
     return () => {
       stopCamera();
     };
-  }, [currentScreen]);
+  }, [isSessionRunning]);
+
+  const initFaceDetector = async (): Promise<FaceDetector | null> => {
+    if (faceDetectorRef.current) return faceDetectorRef.current;
+
+    const createWithSource = async (wasmBase: string, modelPath: string) => {
+      const vision = await FilesetResolver.forVisionTasks(wasmBase);
+      try {
+        return await FaceDetector.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: modelPath,
+            delegate: 'GPU',
+          },
+          runningMode: 'VIDEO',
+          minDetectionConfidence: 0.45,
+        });
+      } catch {
+        return await FaceDetector.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: modelPath,
+            delegate: 'CPU',
+          },
+          runningMode: 'VIDEO',
+          minDetectionConfidence: 0.45,
+        });
+      }
+    };
+
+    try {
+      const detector = await createWithSource(
+        '/mediapipe/wasm',
+        '/mediapipe/models/blaze_face_short_range.tflite'
+      );
+      faceDetectorRef.current = detector;
+      setAiReady(true);
+      return detector;
+    } catch (localErr) {
+      console.warn('Local MediaPipe load failed, falling back to CDN:', localErr);
+      try {
+        const detector = await createWithSource(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/wasm',
+          'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite'
+        );
+        faceDetectorRef.current = detector;
+        setAiReady(true);
+        return detector;
+      } catch (cdnErr) {
+        console.error('Failed to initialize FaceDetector:', cdnErr);
+        setAiReady(false);
+        return null;
+      }
+    }
+  };
 
   const startCamera = async () => {
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 160, height: 120, facingMode: 'user' },
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
           audio: false,
         });
         mediaStreamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
         }
         setCameraActive(true);
         setCameraError(false);
-        startMotionDetection();
+
+        await initFaceDetector();
+        lastSeenAtRef.current = Date.now();
+        startFacePresenceLoop();
       } else {
         setCameraError(true);
       }
@@ -160,72 +237,90 @@ export default function App() {
   };
 
   const stopCamera = () => {
-    if (motionCheckIntervalRef.current) {
-      clearInterval(motionCheckIntervalRef.current);
-      motionCheckIntervalRef.current = null;
+    if (detectionIntervalRef.current) {
+      clearInterval(detectionIntervalRef.current);
+      detectionIntervalRef.current = null;
     }
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
     }
     setCameraActive(false);
+    setAwayCountdown(null);
   };
 
-  const startMotionDetection = () => {
-    inactivityTimerRef.current = 0;
-    prevFrameRef.current = null;
-
-    if (motionCheckIntervalRef.current) {
-      clearInterval(motionCheckIntervalRef.current);
+  const startFacePresenceLoop = () => {
+    if (detectionIntervalRef.current) {
+      clearInterval(detectionIntervalRef.current);
     }
+    lastSeenAtRef.current = Date.now();
+    returnDetectionsRef.current = 0;
 
-    motionCheckIntervalRef.current = window.setInterval(() => {
-      if (!videoRef.current || videoRef.current.readyState < 2) {
+    detectionIntervalRef.current = window.setInterval(() => {
+      const video = videoRef.current;
+      const detector = faceDetectorRef.current;
+      if (!video || video.readyState < 2 || video.videoWidth === 0) {
         return;
       }
+      if (!detector) {
+        lastSeenAtRef.current = Date.now();
+        return;
+      }
+
       const screen = currentScreenRef.current;
       if (screen !== 'active' && screen !== 'paused') {
         return;
       }
 
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return;
+      try {
+        const nowMs = performance.now();
+        const timestamp = nowMs > lastVideoTimeRef.current ? nowMs : lastVideoTimeRef.current + 1;
+        lastVideoTimeRef.current = timestamp;
 
-      ctx.drawImage(videoRef.current, 0, 0, 64, 48);
-      const frameData = ctx.getImageData(0, 0, 64, 48).data;
-
-      if (prevFrameRef.current) {
-        let diff = 0;
-        for (let i = 0; i < frameData.length; i += 16) {
-          diff += Math.abs(frameData[i] - prevFrameRef.current[i]);
-        }
+        const result = detector.detectForVideo(video, timestamp);
+        const isPersonPresent = Boolean(result.detections && result.detections.length > 0);
+        setFaceDetected(isPersonPresent);
 
         if (screen === 'active') {
-          // If difference is low (user left desk / motionless), increment inactivity
-          if (diff < 1500) {
-            inactivityTimerRef.current += 1;
-            if (inactivityTimerRef.current >= awayTimeoutRef.current) {
+          if (isPersonPresent) {
+            lastSeenAtRef.current = Date.now();
+            setAwayCountdown(null);
+          } else {
+            const elapsedAwayMs = Date.now() - lastSeenAtRef.current;
+            const timeoutMs = awayTimeoutRef.current * 1000;
+            const remainingSec = Math.max(0, Math.ceil((timeoutMs - elapsedAwayMs) / 1000));
+            setAwayCountdown(elapsedAwayMs >= 1000 ? remainingSec : null);
+
+            if (elapsedAwayMs >= timeoutMs) {
               handleAutoPause();
             }
-          } else {
-            inactivityTimerRef.current = 0;
           }
         } else if (screen === 'paused') {
-          // User returned! Auto-start / auto-resume when motion is detected
-          if (diff >= 1500) {
-            inactivityTimerRef.current = 0;
-            setCurrentScreen('active');
-            showToast('AI Sensor: Welcome back! Auto-resumed.');
+          if (pauseReasonRef.current === 'auto') {
+            if (isPersonPresent) {
+              returnDetectionsRef.current += 1;
+              if (returnDetectionsRef.current >= 2) {
+                returnDetectionsRef.current = 0;
+                lastSeenAtRef.current = Date.now();
+                setAwayCountdown(null);
+                setCurrentScreen('active');
+                showToast('AI Sensor: Welcome back! Auto-resumed.');
+              }
+            } else {
+              returnDetectionsRef.current = 0;
+            }
           }
         }
+      } catch (err) {
+        console.warn('Face detection frame skipped:', err);
       }
-      prevFrameRef.current = new Uint8ClampedArray(frameData);
-    }, 1000);
+    }, 400);
   };
 
   const handleAutoPause = () => {
+    setPauseReason('auto');
+    setAwayCountdown(null);
+    returnDetectionsRef.current = 0;
     setPauseCount((prev) => prev + 1);
     setCurrentScreen('paused');
     showToast('AI Sensor: Away detected. Paused.');
@@ -236,14 +331,23 @@ export default function App() {
     setSessionName(title);
     setElapsedSeconds(0);
     setPauseCount(0);
+    setPauseReason('auto');
+    setAwayCountdown(null);
+    setFaceDetected(true);
+    lastSeenAtRef.current = Date.now();
     setCurrentScreen('active');
   };
 
   const handlePauseToggle = () => {
     if (currentScreen === 'active') {
+      setPauseReason('manual');
+      setAwayCountdown(null);
       setPauseCount((prev) => prev + 1);
       setCurrentScreen('paused');
     } else if (currentScreen === 'paused') {
+      lastSeenAtRef.current = Date.now();
+      returnDetectionsRef.current = 0;
+      setAwayCountdown(null);
       setCurrentScreen('active');
     }
   };
@@ -417,136 +521,139 @@ export default function App() {
         )}
 
         {/* =========================================================
-             SCREEN 2: ACTIVE TIMER SCREEN
+             SCREEN 2 & 3: ACTIVE TIMER & AUTO-PAUSED SCREEN
+             (Shared wrapper keeps live video stream continuous)
         ========================================================== */}
-        {currentScreen === 'active' && (
+        {(currentScreen === 'active' || currentScreen === 'paused') && (
           <div className="flex-1 flex flex-col justify-between p-6 relative">
             <header className="flex items-center justify-between h-12 border-b border-[#262626] pb-3">
               <div className="text-xs text-[#8A8A8A] font-mono truncate max-w-[260px]">
                 {sessionName || 'Untitled Session'}
               </div>
-              <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-[#141414] border border-[#FF4F00] text-[11px] font-mono text-[#F5F5F5] rounded-[4px]">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#FF4F00] animate-pulse"></span>
-                Studying ✅
-              </div>
+              {currentScreen === 'active' ? (
+                <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-[#141414] border border-[#FF4F00] text-[11px] font-mono text-[#F5F5F5] rounded-[4px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#FF4F00] animate-pulse"></span>
+                  Studying ✅
+                </div>
+              ) : (
+                <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-[#141414] border border-[#262626] text-[11px] font-mono text-[#8A8A8A] rounded-[4px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#8A8A8A]"></span>
+                  Away ⏸️
+                </div>
+              )}
             </header>
 
             <div className="flex flex-col items-center justify-center my-auto">
-              <div className="font-mono text-6xl sm:text-7xl font-bold tracking-tighter text-[#F5F5F5] tabular-nums mb-4">
+              <div
+                className={`font-mono text-6xl sm:text-7xl font-bold tracking-tighter tabular-nums mb-3 transition-opacity ${
+                  currentScreen === 'paused' ? 'text-[#525252] opacity-50' : 'text-[#F5F5F5]'
+                }`}
+              >
                 {formatHHMMSS(elapsedSeconds)}
               </div>
-              <p className="text-xs text-[#8A8A8A] font-mono tracking-wider">
-                AI Presence Monitoring Active
-              </p>
+
+              {currentScreen === 'active' ? (
+                <p className="text-xs text-[#8A8A8A] font-mono tracking-wider">
+                  {!aiReady
+                    ? 'Initializing AI Presence Sensor...'
+                    : awayCountdown !== null
+                    ? `No person detected · Pausing in ${awayCountdown}s`
+                    : faceDetected
+                    ? 'AI Presence Monitoring Active'
+                    : 'Scanning for presence...'}
+                </p>
+              ) : (
+                <p className="text-xs font-mono text-[#8A8A8A] tracking-wider">
+                  {pauseReason === 'auto' ? 'Resume when you return' : 'Paused manually'}
+                </p>
+              )}
             </div>
 
-            <div className="space-y-3 pb-8">
-              <div className="grid grid-cols-2 gap-3">
+            {currentScreen === 'active' ? (
+              <div className="space-y-3 pb-8">
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={handlePauseToggle}
+                    className="bg-[#141414] hover:bg-[#1C1C1C] border border-[#262626] text-[#F5F5F5] font-medium text-xs tracking-wider uppercase py-3.5 rounded-[4px] flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Pause className="w-3.5 h-3.5" />
+                    <span>Pause</span>
+                  </button>
+                  <button
+                    onClick={handleStopSession}
+                    className="bg-[#141414] hover:bg-[#1C1C1C] border border-[#3A2222] hover:border-[#FF4F00] text-[#F5F5F5] font-medium text-xs tracking-wider uppercase py-3.5 rounded-[4px] flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Square className="w-3.5 h-3.5 text-[#FF4F00]" />
+                    <span>Stop</span>
+                  </button>
+                </div>
+
+                <div className="text-center pt-2">
+                  <button
+                    onClick={handleAutoPause}
+                    className="text-[11px] text-[#525252] hover:text-[#8A8A8A] underline underline-offset-4 transition-colors"
+                  >
+                    Simulate AI Desk Departure ({awayTimeout}s timeout)
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3 pb-8">
                 <button
                   onClick={handlePauseToggle}
-                  className="bg-[#141414] hover:bg-[#1C1C1C] border border-[#262626] text-[#F5F5F5] font-medium text-xs tracking-wider uppercase py-3.5 rounded-[4px] flex items-center justify-center gap-2 transition-colors"
+                  className="w-full bg-[#FF4F00] hover:bg-[#E04600] active:scale-[0.99] text-white font-bold text-sm tracking-widest uppercase py-4 rounded-[4px] flex items-center justify-center gap-2 transition-colors cursor-pointer"
                 >
-                  <Pause className="w-3.5 h-3.5" />
-                  <span>Pause</span>
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>RESUME SESSION</span>
                 </button>
                 <button
                   onClick={handleStopSession}
-                  className="bg-[#141414] hover:bg-[#1C1C1C] border border-[#3A2222] hover:border-[#FF4F00] text-[#F5F5F5] font-medium text-xs tracking-wider uppercase py-3.5 rounded-[4px] flex items-center justify-center gap-2 transition-colors"
+                  className="w-full bg-[#141414] hover:bg-[#1C1C1C] border border-[#3A2222] text-[#F5F5F5] font-medium text-xs tracking-wider uppercase py-3.5 rounded-[4px] flex items-center justify-center gap-2 transition-colors"
                 >
                   <Square className="w-3.5 h-3.5 text-[#FF4F00]" />
-                  <span>Stop</span>
+                  <span>Stop Session</span>
                 </button>
               </div>
-
-              <div className="text-center pt-2">
-                <button
-                  onClick={handleAutoPause}
-                  className="text-[11px] text-[#525252] hover:text-[#8A8A8A] underline underline-offset-4 transition-colors"
-                >
-                  Simulate AI Desk Departure ({awayTimeout}s timeout)
-                </button>
-              </div>
-            </div>
+            )}
 
             {/* Live Camera Feed Preview (Bottom-Right Corner) */}
-            <div className="absolute bottom-6 right-6 w-28 h-20 bg-[#141414] border border-[#FF4F00] rounded-[4px] overflow-hidden flex flex-col justify-between shadow-sm z-20">
+            <div
+              className={`absolute bottom-6 right-6 w-28 h-20 bg-[#141414] rounded-[4px] overflow-hidden flex flex-col justify-between z-20 transition-opacity ${
+                currentScreen === 'paused'
+                  ? 'border border-[#262626] opacity-60'
+                  : faceDetected
+                  ? 'border border-[#FF4F00]'
+                  : 'border border-[#525252]'
+              }`}
+            >
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover scale-x-[-1]"
+                className={`w-full h-full object-cover scale-x-[-1] ${cameraError ? 'hidden' : ''}`}
               />
               {cameraError && (
                 <div className="w-full h-full flex flex-col items-center justify-center p-1 text-center bg-[#141414]">
                   <Video className="w-4 h-4 text-[#8A8A8A] mb-1" />
-                  <span className="text-[8px] font-mono text-[#8A8A8A]">AI SENSOR</span>
+                  <span className="text-[8px] font-mono text-[#8A8A8A]">NO CAMERA</span>
                 </div>
               )}
-              <div className="absolute top-1 left-1 bg-[#0D0D0D]/80 px-1 py-0.5 rounded-[2px] text-[8px] font-mono text-[#FF4F00] flex items-center gap-1 border border-[#262626]">
-                <span className="w-1 h-1 bg-[#FF4F00] rounded-full"></span>
-                CAM
+              <div className="absolute top-1 left-1 bg-[#0D0D0D]/85 px-1 py-0.5 rounded-[2px] text-[8px] font-mono flex items-center gap-1 border border-[#262626]">
+                <span
+                  className={`w-1 h-1 rounded-full ${
+                    currentScreen === 'paused'
+                      ? 'bg-[#8A8A8A]'
+                      : faceDetected
+                      ? 'bg-[#FF4F00]'
+                      : 'bg-[#525252]'
+                  }`}
+                ></span>
+                <span className={currentScreen === 'paused' ? 'text-[#8A8A8A]' : 'text-[#F5F5F5]'}>
+                  {currentScreen === 'paused' ? 'AWAY' : faceDetected ? 'CAM' : 'SCAN'}
+                </span>
               </div>
             </div>
-            <canvas ref={canvasRef} width="64" height="48" className="hidden" />
-          </div>
-        )}
-
-        {/* =========================================================
-             SCREEN 3: AUTO-PAUSED SCREEN
-        ========================================================== */}
-        {currentScreen === 'paused' && (
-          <div className="flex-1 flex flex-col justify-between p-6 relative">
-            <header className="flex items-center justify-between h-12 border-b border-[#262626] pb-3">
-              <div className="text-xs text-[#8A8A8A] font-mono truncate max-w-[260px]">
-                {sessionName || 'Untitled Session'}
-              </div>
-              <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-[#141414] border border-[#262626] text-[11px] font-mono text-[#8A8A8A] rounded-[4px]">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#8A8A8A]"></span>
-                Away ⏸️
-              </div>
-            </header>
-
-            <div className="flex flex-col items-center justify-center my-auto">
-              <div className="font-mono text-6xl sm:text-7xl font-bold tracking-tighter text-[#525252] tabular-nums opacity-50 mb-3">
-                {formatHHMMSS(elapsedSeconds)}
-              </div>
-              <p className="text-xs font-mono text-[#8A8A8A] tracking-wider animate-pulse">
-                Resume when you return
-              </p>
-            </div>
-
-            <div className="space-y-3 pb-8">
-              <button
-                onClick={handlePauseToggle}
-                className="w-full bg-[#FF4F00] hover:bg-[#E04600] active:scale-[0.99] text-white font-bold text-sm tracking-widest uppercase py-4 rounded-[4px] flex items-center justify-center gap-2 transition-colors cursor-pointer"
-              >
-                <Play className="w-4 h-4 fill-current" />
-                <span>RESUME SESSION</span>
-              </button>
-              <button
-                onClick={handleStopSession}
-                className="w-full bg-[#141414] hover:bg-[#1C1C1C] border border-[#3A2222] text-[#F5F5F5] font-medium text-xs tracking-wider uppercase py-3.5 rounded-[4px] flex items-center justify-center gap-2 transition-colors"
-              >
-                <Square className="w-3.5 h-3.5 text-[#FF4F00]" />
-                <span>Stop Session</span>
-              </button>
-            </div>
-
-            {/* Live Camera Feed Preview (Dimmed in paused state) */}
-            <div className="absolute bottom-6 right-6 w-28 h-20 bg-[#141414] border border-[#262626] rounded-[4px] overflow-hidden flex flex-col justify-between opacity-60 z-20">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover scale-x-[-1]"
-              />
-              <div className="absolute top-1 left-1 bg-[#0D0D0D]/80 px-1 py-0.5 rounded-[2px] text-[8px] font-mono text-[#8A8A8A] border border-[#262626]">
-                PAUSED
-              </div>
-            </div>
-            <canvas ref={canvasRef} width="64" height="48" className="hidden" />
           </div>
         )}
 
