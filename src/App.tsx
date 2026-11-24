@@ -65,6 +65,12 @@ export default function App() {
   const inactivityTimerRef = useRef<number>(0);
   const motionCheckIntervalRef = useRef<number | null>(null);
 
+  const currentScreenRef = useRef(currentScreen);
+  currentScreenRef.current = currentScreen;
+
+  const awayTimeoutRef = useRef(awayTimeout);
+  awayTimeoutRef.current = awayTimeout;
+
   // Toast notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -169,10 +175,19 @@ export default function App() {
     inactivityTimerRef.current = 0;
     prevFrameRef.current = null;
 
+    if (motionCheckIntervalRef.current) {
+      clearInterval(motionCheckIntervalRef.current);
+    }
+
     motionCheckIntervalRef.current = window.setInterval(() => {
-      if (!videoRef.current || videoRef.current.readyState < 2 || currentScreen !== 'active') {
+      if (!videoRef.current || videoRef.current.readyState < 2) {
         return;
       }
+      const screen = currentScreenRef.current;
+      if (screen !== 'active' && screen !== 'paused') {
+        return;
+      }
+
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -187,16 +202,23 @@ export default function App() {
           diff += Math.abs(frameData[i] - prevFrameRef.current[i]);
         }
 
-        // If difference is low (user left desk / motionless), increment inactivity
-        if (diff < 1500) {
-          inactivityTimerRef.current += 1;
-          if (inactivityTimerRef.current >= awayTimeout && currentScreen === 'active') {
-            // Trigger Auto-Pause
-            handleAutoPause();
+        if (screen === 'active') {
+          // If difference is low (user left desk / motionless), increment inactivity
+          if (diff < 1500) {
+            inactivityTimerRef.current += 1;
+            if (inactivityTimerRef.current >= awayTimeoutRef.current) {
+              handleAutoPause();
+            }
+          } else {
+            inactivityTimerRef.current = 0;
           }
-        } else {
-          // Motion detected! Reset inactivity
-          inactivityTimerRef.current = 0;
+        } else if (screen === 'paused') {
+          // User returned! Auto-start / auto-resume when motion is detected
+          if (diff >= 1500) {
+            inactivityTimerRef.current = 0;
+            setCurrentScreen('active');
+            showToast('AI Sensor: Welcome back! Auto-resumed.');
+          }
         }
       }
       prevFrameRef.current = new Uint8ClampedArray(frameData);
