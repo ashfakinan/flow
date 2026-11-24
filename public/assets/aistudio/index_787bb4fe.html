@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0D0D0D" />
+  <meta name="description" content="Flow — AI Study Tracker. Focused. Minimal. Serious." />
+  <title>Flow — AI Study Tracker</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⏱</text></svg>" />
+</head>
+<body>
+  <!-- ========== HOME SCREEN ========== -->
+  <section id="screen-home" class="screen active">
+    <header class="top-bar">
+      <div class="logo">Flow</div>
+    </header>
+
+    <main class="home-main">
+      <div class="home-content">
+        <label class="input-label" for="session-name">Name your session</label>
+        <input
+          type="text"
+          id="session-name"
+          class="session-input"
+          placeholder="e.g. Anatomy — Ch. 4"
+          autocomplete="off"
+          maxlength="48"
+        />
+        <button id="btn-start" class="btn-primary btn-large" disabled>START</button>
+      </div>
+    </main>
+
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-screen="home" aria-label="Timer">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="13" r="8"/>
+          <path d="M12 9v4l2.5 1.5"/>
+          <path d="M9 2h6"/>
+          <path d="M12 2v2"/>
+        </svg>
+        <span class="nav-label">Timer</span>
+      </button>
+      <button class="nav-item" data-screen="stats" aria-label="Stats">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19V9"/>
+          <path d="M10 19V5"/>
+          <path d="M16 19v-7"/>
+          <path d="M22 19V3"/>
+        </svg>
+        <span class="nav-label">Stats</span>
+      </button>
+    </nav>
+  </section>
+
+  <!-- ========== ACTIVE TIMER SCREEN ========== -->
+  <section id="screen-active" class="screen">
+    <header class="top-bar top-bar-centered">
+      <div class="session-title" id="active-session-name">Anatomy — Ch. 4</div>
+    </header>
+
+    <main class="timer-main">
+      <div class="status-badge" id="status-badge">
+        <span class="badge-dot"></span>
+        Studying
+      </div>
+
+      <div class="timer-display" id="timer-display">00:00:00</div>
+
+      <div class="timer-actions">
+        <button id="btn-pause" class="btn-secondary">Pause</button>
+        <button id="btn-stop" class="btn-danger">Stop</button>
+      </div>
+    </main>
+
+    <!-- Small camera preview (bottom-right corner) -->
+    <div class="camera-preview" id="camera-preview" aria-hidden="true">
+      <div class="camera-placeholder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== AUTO-PAUSED SCREEN ========== -->
+  <section id="screen-paused" class="screen">
+    <header class="top-bar top-bar-centered">
+      <div class="session-title" id="paused-session-name">Anatomy — Ch. 4</div>
+    </header>
+
+    <main class="timer-main">
+      <div class="status-badge status-away" id="paused-badge">
+        <span class="badge-dot away"></span>
+        Away
+      </div>
+
+      <div class="timer-display dimmed" id="paused-timer-display">00:12:34</div>
+
+      <p class="resume-hint">Resume when you return</p>
+
+      <div class="timer-actions">
+        <button id="btn-resume" class="btn-primary">Resume</button>
+        <button id="btn-stop-paused" class="btn-danger">Stop</button>
+      </div>
+    </main>
+
+    <div class="camera-preview dimmed" id="paused-camera">
+      <div class="camera-placeholder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SESSION END SCREEN ========== -->
+  <section id="screen-end" class="screen">
+    <header class="top-bar">
+      <div class="logo">Flow</div>
+    </header>
+
+    <main class="end-main">
+      <div class="summary-card">
+        <h2 class="summary-title">Session Complete</h2>
+        <div class="summary-row">
+          <span class="summary-label">Session</span>
+          <span class="summary-value" id="end-session-name">Anatomy — Ch. 4</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Date</span>
+          <span class="summary-value" id="end-date">24 Nov 2026</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Duration</span>
+          <span class="summary-value accent" id="end-duration">01:24:17</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Pauses</span>
+          <span class="summary-value" id="end-pauses">3</span>
+        </div>
+      </div>
+
+      <div class="end-actions">
+        <button id="btn-export" class="btn-secondary btn-full">Export CSV</button>
+        <button id="btn-back-home" class="btn-primary btn-full">Back to Home</button>
+      </div>
+    </main>
+  </section>
+
+  <!-- ========== STATS SCREEN ========== -->
+  <section id="screen-stats" class="screen">
+    <header class="top-bar">
+      <div class="logo">Flow</div>
+    </header>
+
+    <main class="stats-main">
+      <div class="stats-hero">
+        <div class="stats-label">Today</div>
+        <div class="stats-today" id="stats-today">02:41:08</div>
+        <div class="stats-alltime">
+          <span class="stats-label-sm">All time</span>
+          <span id="stats-alltime">47:12:33</span>
+        </div>
+      </div>
+
+      <div class="history-header">
+        <h3>Session History</h3>
+      </div>
+
+      <div class="history-list" id="history-list">
+        <!-- Populated by JS -->
+      </div>
+    </main>
+
+    <nav class="bottom-nav">
+      <button class="nav-item" data-screen="home" aria-label="Timer">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="13" r="8"/>
+          <path d="M12 9v4l2.5 1.5"/>
+          <path d="M9 2h6"/>
+          <path d="M12 2v2"/>
+        </svg>
+        <span class="nav-label">Timer</span>
+      </button>
+      <button class="nav-item active" data-screen="stats" aria-label="Stats">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19V9"/>
+          <path d="M10 19V5"/>
+          <path d="M16 19v-7"/>
+          <path d="M22 19V3"/>
+        </svg>
+        <span class="nav-label">Stats</span>
+      </button>
+    </nav>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>

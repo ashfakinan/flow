@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0D0D0D">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="description" content="Flow — Focused AI Study Tracker">
+    <title>Flow — AI Study Tracker</title>
+
+    <!-- Dynamic Inline PWA Manifest for Installability -->
+    <link rel="manifest" id="pwa-manifest">
+
+    <!-- Geometric Sans-Serif Typography: Space Grotesk & Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                        display: ['Space Grotesk', 'system-ui', 'sans-serif'],
+                    },
+                    colors: {
+                        bg: '#0D0D0D',
+                        surface: '#141414',
+                        border: '#262626',
+                        accent: '#FF4F00', // International Safety Orange — Flat, crisp, high-focus
+                        accentHover: '#E04600',
+                        textPrimary: '#F5F5F5',
+                        textSecondary: '#8A8A8A',
+                        textMuted: '#525252',
+                    },
+                    borderRadius: {
+                        DEFAULT: '4px',
+                        'sm': '2px',
+                        'md': '4px',
+                        'lg': '6px',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Strict Reset & Base Styles */
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            background-color: #0D0D0D;
+            color: #F5F5F5;
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow-x: hidden;
+            user-select: none;
+        }
+
+        /* Tabular numbers for zero-jitter timer ticking */
+        .tabular-nums {
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "tnum";
+        }
+
+        /* Custom subtle scrollbar for history table */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0D0D0D;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #262626;
+            border-radius: 2px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #404040;
+        }
+
+        /* Mirror webcam feed naturally */
+        #webcam-feed {
+            transform: scaleX(-1);
+        }
+
+        /* Ensure strict 4px-6px max corner radius across interactive elements */
+        input, button, .card-box {
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="bg-bg text-textPrimary flex justify-center min-h-screen">
+
+    <!-- Mobile-First App Shell (Centered on Desktop with crisp 1px structural borders) -->
+    <div id="app-shell" class="w-full max-w-md bg-bg sm:border-x sm:border-border flex flex-col min-h-screen relative">
+
+        <!-- TOP HEADER BAR -->
+        <header class="h-14 px-5 border-b border-border flex items-center justify-between shrink-0">
+            <!-- Brand Logo Top Left -->
+            <div class="flex items-center gap-2.5">
+                <div class="w-2.5 h-2.5 bg-accent"></div>
+                <span class="font-display font-bold text-lg tracking-tight text-textPrimary">Flow</span>
+            </div>
+
+            <!-- Utility Actions (Download App HTML / AI Sensor Toggle) -->
+            <div class="flex items-center gap-3">
+                <button id="btn-download-app" title="Download Flow PWA File" class="text-xs font-medium text-textSecondary hover:text-textPrimary border border-border px-2.5 py-1.5 flex items-center gap-1.5 transition-colors">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square" stroke-linejoin="miter">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    <span>Download App</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- MAIN VIEWPORT CONTAINER -->
+        <main class="flex-1 flex flex-col relative overflow-y-auto">
+
+            <!-- =========================================================
+                 SCREEN 1: HOME SCREEN
+            ========================================================== -->
+            <section id="screen-home" class="flex-1 flex flex-col justify-between p-6">
+                <div class="mt-6">
+                    <p class="text-xs font-mono uppercase tracking-widest text-textSecondary mb-2">New Focus Block</p>
+                    <h1 class="font-display text-2xl font-semibold tracking-tight text-textPrimary mb-8">
+                        Define your objective before starting the clock.
+                    </h1>
+
+                    <!-- Session Name Input -->
+                    <div class="space-y-2">
+                        <label for="session-name-input" class="block text-xs font-medium text-textSecondary uppercase tracking-wider">
+                            Session Title
+                        </label>
+                        <input
+                            type="text"
+                            id="session-name-input"
+                            placeholder="Name your session"
+                            maxlength="60"
+                            autocomplete="off"
+                            class="w-full bg-surface border border-border focus:border-accent focus:outline-none text-textPrimary placeholder-textMuted px-4 py-3.5 text-base font-normal transition-colors"
+                        >
+                        <div class="flex items-center justify-between pt-1">
+                            <span class="text-xs text-textMuted">AI presence detection activates on start</span>
+                            <span id="char-count" class="text-xs text-textMuted tabular-nums">0/60</span>
+                        </div>
+                    </div>
+
+                    <!-- Quick Subject Presets (Minimal Medical/Academic Tags) -->
+                    <div class="mt-6">
+                        <span class="block text-[11px] font-medium text-textMuted uppercase tracking-wider mb-2.5">Quick Fill</span>
+                        <div class="flex flex-wrap gap-2">
+                            <button type="button" class="preset-btn text-xs text-textSecondary hover:text-textPrimary bg-surface border border-border hover:border-textSecondary px-3 py-1.5 transition-colors">
+                                Anatomy &amp; Physiology
+                            </button>
+                            <button type="button" class="preset-btn text-xs text-textSecondary hover:text-textPrimary bg-surface border border-border hover:border-textSecondary px-3 py-1.5 transition-colors">
+                                Pharmacology Anki
+                            </button>
+                            <button type="button" class="preset-btn text-xs text-textSecondary hover:text-textPrimary bg-surface border border-border hover:border-textSecondary px-3 py-1.5 transition-colors">
+                                USMLE Q-Bank
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Large START Button -->
+                <div class="pt-8 pb-2">
+                    <button
+                        id="btn-start-session"
+                        class="w-full bg-accent hover:bg-accentHover active:opacity-90 text-bg font-display font-bold text-base tracking-wider uppercase py-4 px-6 flex items-center justify-center gap-3 transition-colors cursor-pointer"
+                    >
+                        <span>START</span>
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="square">
+                            <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                    </button>
+                </div>
+            </section>
+
+            <!-- =========================================================
+                 SCREEN 2 & 3: ACTIVE TIMER & AUTO-PAUSED SCREEN
+            ========================================================== -->
+            <section id="screen-timer" class="hidden flex-1 flex flex-col justify-between p-6 relative">
+
+                <!-- Top Section: Status Badge & Session Name -->
+                <div class="flex flex-col items-center text-center mt-4">
+                    <!-- Status Badge ("Studying ✅" or "Away ⏸️") -->
+                    <div id="status-badge" class="inline-flex items-center gap-2 px-3 py-1.5 bg-surface border border-border text-xs font-medium tracking-wide mb-6">
+                        <span id="status-badge-text">Studying ✅</span>
+                    </div>
+
+                    <!-- Session Name Shown Above Timer -->
+                    <h2 id="active-session-title" class="text-sm font-medium text-textSecondary max-w-xs truncate px-2">
+                        Untitled Session
+                    </h2>
+                </div>
+
+                <!-- Center Section: Large HH:MM:SS Timer & Auto-Pause Prompt -->
+                <div class="flex flex-col items-center justify-center my-auto py-8">
+                    <div
+                        id="timer-display"
+                        class="font-display font-bold text-5xl sm:text-6xl tracking-tight tabular-nums text-textPrimary transition-opacity duration-200"
+                    >
+                        00:00:00
+                    </div>
+
+                    <!-- Subtle "Resume when you return" text shown only in Auto-Paused / Paused state -->
+                    <p id="auto-pause-subtext" class="invisible text-xs font-medium text-textSecondary tracking-wide mt-4">
+                        Resume when you return
+                    </p>
+                </div>
+
+                <!-- Controls Section: Pause and Stop Buttons Below Timer -->
+                <div class="w-full max-w-[260px] mx-auto mb-24 z-10">
+                    <div class="grid grid-cols-2 gap-3">
+                        <button
+                            id="btn-toggle-pause"
+                            class="bg-surface hover:bg-neutral-800 border border-border text-textPrimary font-medium text-sm py-3.5 px-4 flex items-center justify-center gap-2 transition-colors"
+                        >
+                            <svg id="icon-pause" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square">
+                                <rect x="6" y="4" width="4" height="16"/>
+                                <rect x="14" y="4" width="4" height="16"/>
+                            </svg>
+                            <svg id="icon-resume" class="w-4 h-4 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square">
+                                <polygon points="5 3 19 12 5 21 5 3"/>
+                            </svg>
+                            <span id="btn-pause-label">Pause</span>
+                        </button>
+
+                        <button
+                            id="btn-stop-session"
+                            class="bg-surface hover:bg-neutral-800 border border-border hover:border-accent text-textPrimary font-medium text-sm py-3.5 px-4 flex items-center justify-center gap-2 transition-colors"
+                        >
+                            <svg class="w-4 h-4 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square">
+                                <rect x="4" y="4" width="16" height="16"/>
+                            </svg>
+                            <span>Stop</span>
+                        </button>
+                    </div>
+
+                    <!-- Manual AI Presence Simulator Toggle (For testing Auto-Pause without leaving desk) -->
+                    <div class="mt-3 text-center">
+                        <button
+                            id="btn-simulate-away"
+                            type="button"
+                            class="text-[11px] text-textMuted hover:text-textSecondary underline underline-offset-4 transition-colors"
+                        >
+                            Simulate AI Desk Departure
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Bottom Corner: Small Camera Preview Box -->
+                <div
+                    id="camera-preview-box"
+                    class="fixed sm:absolute bottom-16 right-4 w-28 h-20 bg-surface border border-border overflow-hidden flex flex-col justify-between z-20"
+                    style="border-radius: 4px;"
+                >
+                    <video id="webcam-feed" autoplay playsinline muted class="w-full h-full object-cover hidden"></video>
+
+                    <!-- Fallback / Sensor Indicator Overlay -->
+                    <div id="camera-fallback" class="w-full h-full flex flex-col items-center justify-center p-1.5 text-center bg-surface">
+                        <svg class="w-4 h-4 text-textSecondary mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square">
+                            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                            <circle cx="12" cy="13" r="4"/>
+                        </svg>
+                        <span id="camera-status-label" class="text-[9px] font-mono uppercase tracking-wider text-textSecondary leading-tight">
+                            AI Vision Ready
+                        </span>
+                    </div>
+
+                    <!-- Live Sensor Corner Tag -->
+                    <div class="absolute top-1 left-1.5 flex items-center gap-1 bg-bg/90 px-1 py-0.5 border border-border">
+                        <span id="sensor-dot" class="w-1.5 h-1.5 bg-accent"></span>
+                        <span class="text-[8px] font-mono uppercase tracking-wider text-textPrimary">CAM</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- =========================================================
+                 SCREEN 4: SESSION END SCREEN
+            ========================================================== -->
+            <section id="screen-end" class="hidden flex-1 flex flex-col justify-between p-6">
+                <div class="mt-4">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="w-2 h-2 bg-accent"></span>
+                        <span class="text-xs font-mono uppercase tracking-widest text-textSecondary">Session Logged</span>
+                    </div>
+                    <h1 class="font-display text-2xl font-semibold tracking-tight text-textPrimary mb-6">
+                        Block Summary
+                    </h1>
+
+                    <!-- Summary Card -->
+                    <div class="bg-surface border border-border p-5 space-y-4">
+                        <div class="border-b border-border pb-3.5">
+                            <span class="block text-[11px] font-mono uppercase tracking-wider text-textSecondary mb-1">Session Name</span>
+                            <p id="summary-name" class="text-base font-medium text-textPrimary break-words">—</p>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4 border-b border-border pb-3.5">
+                            <div>
+                                <span class="block text-[11px] font-mono uppercase tracking-wider text-textSecondary mb-1">Date</span>
+                                <p id="summary-date" class="text-sm font-medium text-textPrimary tabular-nums">—</p>
+                            </div>
+                            <div>
+                                <span class="block text-[11px] font-mono uppercase tracking-wider text-textSecondary mb-1">Pause Count</span>
+                                <p id="summary-pauses" class="text-sm font-medium text-textPrimary tabular-nums">0</p>
+                            </div>
+                        </div>
+
+                        <div>
+                            <span class="block text-[11px] font-mono uppercase tracking-wider text-textSecondary mb-1">Total Duration</span>
+                            <p id="summary-duration" class="font-display text-3xl font-bold text-accent tabular-nums">00:00:00</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Two Action Buttons: "Export CSV" and "Back to Home" -->
+                <div class="space-y-3 pt-6 pb-2">
+                    <button
+                        id="btn-export-single-csv"
+                        class="w-full bg-surface hover:bg-neutral-800 border border-border text-textPrimary font-medium text-sm py-3.5 px-5 flex items-center justify-center gap-2 transition-colors"
+                    >
+                        <svg class="w-4 h-4 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                        </svg>
+                        <span>Export CSV</span>
+                    </button>
+
+                    <button
+                        id="btn-back-home"
+                        class="w-full bg-accent hover:bg-accentHover text-bg font-display font-bold text-sm tracking-wider uppercase py-3.5 px-5 flex items-center justify-center gap-2 transition-colors"
+                    >
+                        <span>Back to Home</span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- =========================================================
+                 SCREEN 5: STATS SCREEN
+            ========================================================== -->
+            <section id="screen-stats" class="hidden flex-1 flex flex-col p-6">
+                <!-- Top Totals Block -->
+                <div class="border-b border-border pb-6 mb-6">
+                    <span class="block text-xs font-mono uppercase tracking-widest text-textSecondary mb-1">Today's Total Time</span>
+                    <div id="stats-today-total" class="font-display text-4xl sm:text-5xl font-bold tracking-tight text-textPrimary tabular-nums">
+                        00h 00m
+                    </div>
+
+                    <div class="mt-4 flex items-center justify-between pt-3 border-t border-border/60">
+                        <span class="text-xs font-mono uppercase tracking-wider text-textSecondary">All-Time Total</span>
+                        <span id="stats-alltime-total" class="font-display text-base font-semibold text-accent tabular-nums">
+                            00h 00m
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Session History Header -->
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-xs font-mono uppercase tracking-widest text-textSecondary">Session History</h2>
+                    <button id="btn-export-all-csv" class="text-xs text-textSecondary hover:text-accent flex items-center gap-1 transition-colors">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        <span>Export All CSV</span>
+                    </button>
+                </div>
+
+                <!-- Clean Session History Table (Name | Date | Duration | Pauses) -->
+                <div class="flex-1 border border-border bg-surface overflow-hidden flex flex-col">
+                    <!-- Table Header -->
+                    <div class="grid grid-cols-12 gap-2 px-3.5 py-2.5 border-b border-border bg-bg text-[10px] font-mono uppercase tracking-wider text-textSecondary">
+                        <div class="col-span-5">Name</div>
+                        <div class="col-span-3">Date</div>
+                        <div class="col-span-3 text-right">Duration</div>
+                        <div class="col-span-1 text-right">P</div>
+                    </div>
+
+                    <!-- Table Rows Container -->
+                    <div id="history-table-body" class="divide-y divide-border overflow-y-auto max-h-[340px]">
+                        <!-- Populated dynamically via JS -->
+                    </div>
+                </div>
+            </section>
+
+        </main>
+
+        <!-- =========================================================
+             BOTTOM NAVIGATION BAR (2 ITEMS ONLY: Timer & Chart)
+        ========================================================== -->
+        <nav id="bottom-nav" class="h-14 bg-bg border-t border-border grid grid-cols-2 shrink-0 z-30">
+            <!-- Item 1: Timer Icon (Home) -->
+            <button
+                id="nav-home"
+                aria-label="Timer"
+                class="flex flex-col items-center justify-center gap-1 border-r border-border text-accent transition-colors"
+            >
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square" stroke-linejoin="miter">
+                    <circle cx="12" cy="13" r="8"/>
+                    <path d="M12 9v4l2 2"/>
+                    <path d="M9 2h6"/>
+                    <path d="M12 2v3"/>
+                </svg>
+                <span class="text-[10px] font-mono uppercase tracking-wider">Timer</span>
+            </button>
+
+            <!-- Item 2: Chart Icon (Stats) -->
+            <button
+                id="nav-stats"
+                aria-label="Stats"
+                class="flex flex-col items-center justify-center gap-1 text-textSecondary hover:text-textPrimary transition-colors"
+            >
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square" stroke-linejoin="miter">
+                    <line x1="18" y1="20" x2="18" y2="10"/>
+                    <line x1="12" y1="20" x2="12" y2="4"/>
+                    <line x1="6" y1="20" x2="6" y2="14"/>
+                </svg>
+                <span class="text-[10px] font-mono uppercase tracking-wider">Stats</span>
+            </button>
+        </nav>
+
+        <!-- Minimal Inline Notification Banner (Replaces alert) -->
+        <div id="toast-banner" class="hidden fixed top-16 left-1/2 -translate-x-1/2 bg-surface border border-accent text-textPrimary text-xs font-mono px-4 py-2.5 z-50">
+            <span id="toast-message">Notification</span>
+        </div>
+    </div>
+
+    <!-- Hidden Canvas for Lightweight Motion/Presence Detection -->
+    <canvas id="motion-canvas" width="64" height="48" class="hidden"></canvas>
+
+    <script>
+        /**
+         * FLOW — AI Study Tracker PWA
+         * Architecture: Single-file, zero-dependency state machine with localStorage persistence,
+         * WebRTC camera presence monitoring, and instant CSV/HTML export.
+         */
+
+        // --- 1. PWA MANIFEST & SERVICE WORKER SETUP ---
+        (function initPWA() {
+            const manifest = {
+                name: "Flow — AI Study Tracker",
+                short_name: "Flow",
+                start_url: ".",
+                display: "standalone",
+                background_color: "#0D0D0D",
+                theme_color: "#0D0D0D",
+                description: "Focused, minimal AI study timer.",
+                icons: [
+                    {
+                        src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' fill='%230D0D0D'/%3E%3Crect x='144' y='144' width='224' height='224' fill='%23FF4F00'/%3E%3C/svg%3E",
+                        sizes: "512x512",
+                        type: "image/svg+xml"
+                    }
+                ]
+            };
+            const stringManifest = JSON.stringify(manifest);
+            const blob = new Blob([stringManifest], { type: 'application/json' });
+            const manifestURL = URL.createObjectURL(blob);
+            document.getElementById('pwa-manifest').setAttribute('href', manifestURL);
+        })();
+
+        // --- 2. APPLICATION STATE ---
+        const STORAGE_KEY = 'flow_study_sessions_v1';
+
+        const state = {
+            currentScreen: 'home', // 'home' | 'timer' | 'end' | 'stats'
+            sessionName: '',
+            elapsedSeconds: 0,
+            pauseCount: 0,
+            status: 'idle', // 'idle' | 'studying' | 'away'
+            timerInterval: null,
+            lastCompletedSession: null,
+            sessions: [],
+            mediaStream: null,
+            motionInterval: null,
+            prevFrameData: null,
+            inactivityCounter: 0
+        };
+
+        // --- 3. DOM ELEMENTS ---
+        const screens = {
+            home: document.getElementById('screen-home'),
+            timer: document.getElementById('screen-timer'),
+            end: document.getElementById('screen-end'),
+            stats: document.getElementById('screen-stats')
+        };
+
+        const els = {
+            sessionInput: document.getElementById('session-name-input'),
+            charCount: document.getElementById('char-count'),
+            btnStart: document.getElementById('btn-start-session'),
+            presetBtns: document.querySelectorAll('.preset-btn'),
+
+            // Timer Screen
+            statusBadge: document.getElementById('status-badge'),
+            statusBadgeText: document.getElementById('status-badge-text'),
+            activeTitle: document.getElementById('active-session-title'),
+            timerDisplay: document.getElementById('timer-display'),
+            autoPauseSubtext: document.getElementById('auto-pause-subtext'),
+            btnTogglePause: document.getElementById('btn-toggle-pause'),
+            btnPauseLabel: document.getElementById('btn-pause-label'),
+            iconPause: document.getElementById('icon-pause'),
+            iconResume: document.getElementById('icon-resume'),
+            btnStop: document.getElementById('btn-stop-session'),
+            btnSimulateAway: document.getElementById('btn-simulate-away'),
+
+            // Camera Preview
+            webcamFeed: document.getElementById('webcam-feed'),
+            cameraFallback: document.getElementById('camera-fallback'),
+            cameraStatusLabel: document.getElementById('camera-status-label'),
+            sensorDot: document.getElementById('sensor-dot'),
+            motionCanvas: document.getElementById('motion-canvas'),
+
+            // Session End Screen
+            summaryName: document.getElementById('summary-name'),
+            summaryDate: document.getElementById('summary-date'),
+            summaryPauses: document.getElementById('summary-pauses'),
+            summaryDuration: document.getElementById('summary-duration'),
+            btnExportSingleCsv: document.getElementById('btn-export-single-csv'),
+            btnBackHome: document.getElementById('btn-back-home'),
+
+            // Stats Screen
+            statsTodayTotal: document.getElementById('stats-today-total'),
+            statsAlltimeTotal: document.getElementById('stats-alltime-total'),
+            historyTableBody: document.getElementById('history-table-body'),
+            btnExportAllCsv: document.getElementById('btn-export-all-csv'),
+
+            // Bottom Nav & Header
+            bottomNav: document.getElementById('bottom-nav'),
+            navHome: document.getElementById('nav-home'),
+            navStats: document.getElementById('nav-stats'),
+            btnDownloadApp: document.getElementById('btn-download-app'),
+            toastBanner: document.getElementById('toast-banner'),
+            toastMessage: document.getElementById('toast-message')
+        };
+
+        // --- 4. STORAGE & SEED DATA ---
+        function loadSessions() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (raw) {
+                    state.sessions = JSON.parse(raw);
+                } else {
+                    // Seed clean initial medical-student study log for immediate visual clarity on Stats screen
+                    const todayStr = formatDateISO(new Date());
+                    const yesterday = new Date();
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    const yesterdayStr = formatDateISO(yesterday);
+
+                    state.sessions = [
+                        {
+                            id: 'seed-1',
+                            name: 'Cardiovascular Pathology',
+                            date: todayStr,
+                            durationSeconds: 3300, // 55m
+                            pauses: 1
+                        },
+                        {
+                            id: 'seed-2',
+                            name: 'Renal Physiology Review',
+                            date: yesterdayStr,
+                            durationSeconds: 5400, // 1h 30m
+                            pauses: 2
+                        },
+                        {
+                            id: 'seed-3',
+                            name: 'Autonomic Pharmacology',
+                            date: yesterdayStr,
+                            durationSeconds: 2700, // 45m
+                            pauses: 0
+                        }
+                    ];
+                    saveSessions();
+                }
+            } catch (e) {
+                console.error('Failed to load sessions:', e);
+                state.sessions = [];
+            }
+        }
+
+        function saveSessions() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state.sessions));
+            } catch (e) {
+                console.error('Failed to save sessions:', e);
+            }
+        }
+
+        // --- 5. FORMATTING HELPERS ---
+        function formatHHMMSS(totalSeconds) {
+            const hrs = Math.floor(totalSeconds / 3600);
+            const mins = Math.floor((totalSeconds % 3600) / 60);
+            const secs = totalSeconds % 60;
+            return [hrs, mins, secs].map(v => String(v).padStart(2, '0')).join(':');
+        }
+
+        function formatHoursMinutes(totalSeconds) {
+            const hrs = Math.floor(totalSeconds / 3600);
+            const mins = Math.floor((totalSeconds % 3600) / 60);
+            return `${String(hrs).padStart(2, '0')}h ${String(mins).padStart(2, '0')}m`;
+        }
+
+        function formatCompactDuration(totalSeconds) {
+            const hrs = Math.floor(totalSeconds / 3600);
+            const mins = Math.floor((totalSeconds % 3600) / 60);
+            const secs = totalSeconds % 60;
+            if (hrs > 0) return `${hrs}h ${String(mins).padStart(2, '0')}m`;
+            if (mins > 0) return `${mins}m ${String(secs).padStart(2, '0')}s`;
+            return `${secs}s`;
+        }
+
+        function formatDateISO(dateObj) {
+            const y = dateObj.getFullYear();
+            const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const d = String(dateObj.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
+        function formatShortDate(isoStr) {
+            // Converts YYYY-MM-DD to "Nov 24"
+            const parts = isoStr.split('-');
+            if (parts.length !== 3) return isoStr;
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const monthIdx = parseInt(parts[1], 10) - 1;
+            return `${months[monthIdx] || parts[1]} ${parseInt(parts[2], 10)}`;
+        }
+
+        function showToast(msg) {
+            els.toastMessage.textContent = msg;
+            els.toastBanner.classList.remove('hidden');
+            clearTimeout(window._toastTimer);
+            window._toastTimer = setTimeout(() => {
+                els.toastBanner.classList.add('hidden');
+            }, 2600);
+        }
+
+        // --- 6. NAVIGATION & VIEW ROUTER ---
+        function navigateTo(screenName) {
+            state.currentScreen = screenName;
+
+            // Hide all screens
+            Object.values(screens).forEach(sec => sec.classList.add('hidden'));
+
+            // Show target screen
+            if (screens[screenName]) {
+                screens[screenName].classList.remove('hidden');
+            }
+
+            // Bottom Nav Visibility & Active State
+            if (screenName === 'timer') {
+                // Keep bottom nav hidden during active focus session to eliminate distractions
+                els.bottomNav.classList.add('hidden');
+            } else {
+                els.bottomNav.classList.remove('hidden');
+            }
+
+            // Update Nav Tab Highlighting (Accent color #FF4F00 on active tab)
+            if (screenName === 'stats') {
+                els.navStats.classList.remove('text-textSecondary');
+                els.navStats.classList.add('text-accent');
+                els.navHome.classList.remove('text-accent');
+                els.navHome.classList.add('text-textSecondary');
+                renderStatsScreen();
+            } else {
+                els.navHome.classList.remove('text-textSecondary');
+                els.navHome.classList.add('text-accent');
+                els.navStats.classList.remove('text-accent');
+                els.navStats.classList.add('text-textSecondary');
+            }
+        }
+
+        // --- 7. TIMER & AI PRESENCE ENGINE ---
+        async function startCameraSensor() {
+            try {
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: 160, height: 120, facingMode: 'user' },
+                        audio: false
+                    });
+                    state.mediaStream = stream;
+                    els.webcamFeed.srcObject = stream;
+                    els.webcamFeed.classList.remove('hidden');
+                    els.cameraFallback.classList.add('hidden');
+                    startMotionMonitoring();
+                } else {
+                    throw new Error('Camera API unavailable');
+                }
+            } catch (err) {
+                // Clean fallback when camera permission is denied or unavailable
+                els.webcamFeed.classList.add('hidden');
+                els.cameraFallback.classList.remove('hidden');
+                els.cameraStatusLabel.textContent = 'AI Sensor Standby';
+            }
+        }
+
+        function stopCameraSensor() {
+            if (state.motionInterval) {
+                clearInterval(state.motionInterval);
+                state.motionInterval = null;
+            }
+            if (state.mediaStream) {
+                state.mediaStream.getTracks().forEach(track => track.stop());
+                state.mediaStream = null;
+            }
+            els.webcamFeed.srcObject = null;
+            els.webcamFeed.classList.add('hidden');
+            els.cameraFallback.classList.remove('hidden');
+        }
+
+        function startMotionMonitoring() {
+            const ctx = els.motionCanvas.getContext('2d', { willReadFrequently: true });
+            state.prevFrameData = null;
+            state.inactivityCounter = 0;
+
+            state.motionInterval = setInterval(() => {
+                if (!state.mediaStream || els.webcamFeed.readyState < 2) return;
+
+                ctx.drawImage(els.webcamFeed, 0, 0, 64, 48);
+                const frame = ctx.getImageData(0, 0, 64, 48).data;
+
+                if (state.prevFrameData) {
+                    let diffScore = 0;
+                    for (let i = 0; i < frame.length; i += 16) {
+                        diffScore += Math.abs(frame[i] - state.prevFrameData[i]);
+                    }
+                    // Subtle presence micro-movement threshold
+                    if (diffScore > 1800) {
+                        state.inactivityCounter = 0;
+                        // Auto-resume if previously auto-paused by AI sensor
+                        if (state.status === 'away' && state.autoPausedByAI) {
+                            setTimerStatus('studying', false);
+                        }
+                    } else {
+                        state.inactivityCounter++;
+                        // Trigger AI Auto-Pause after 25 seconds of zero frame change
+                        if (state.inactivityCounter >= 25 && state.status === 'studying') {
+                            setTimerStatus('away', true);
+                        }
+                    }
+                }
+                state.prevFrameData = new Uint8ClampedArray(frame);
+            }, 1000);
+        }
+
+        function startSession() {
+            const rawName = els.sessionInput.value.trim();
+            state.sessionName = rawName || 'Focused Study Block';
+            state.elapsedSeconds = 0;
+            state.pauseCount = 0;
+            state.autoPausedByAI = false;
+
+            els.activeTitle.textContent = state.sessionName;
+            els.timerDisplay.textContent = '00:00:00';
+
+            navigateTo('timer');
+            setTimerStatus('studying', false);
+            startCameraSensor();
+
+            clearInterval(state.timerInterval);
+            state.timerInterval = setInterval(() => {
+                if (state.status === 'studying') {
+                    state.elapsedSeconds++;
+                    els.timerDisplay.textContent = formatHHMMSS(state.elapsedSeconds);
+                }
+            }, 1000);
+        }
+
+        function setTimerStatus(newStatus, isAutoAI = false) {
+            if (state.status === newStatus) return;
+
+            if (newStatus === 'away') {
+                state.status = 'away';
+                state.pauseCount++;
+                state.autoPausedByAI = isAutoAI;
+
+                // Visual state: Auto-Paused / Away Screen
+                els.statusBadgeText.textContent = 'Away ⏸️';
+                els.statusBadge.classList.remove('border-accent', 'text-textPrimary');
+                els.statusBadge.classList.add('border-border', 'text-textSecondary');
+
+                // Dimmed / greyed timer
+                els.timerDisplay.classList.remove('text-textPrimary');
+                els.timerDisplay.classList.add('text-textMuted', 'opacity-50');
+
+                // Reveal subtle "Resume when you return" text
+                els.autoPauseSubtext.classList.remove('invisible');
+
+                // Update Pause Button to Resume
+                els.btnPauseLabel.textContent = 'Resume';
+                els.iconPause.classList.add('hidden');
+                els.iconResume.classList.remove('hidden');
+
+                // Sensor indicator
+                els.sensorDot.classList.remove('bg-accent');
+                els.sensorDot.classList.add('bg-textMuted');
+                els.btnSimulateAway.textContent = 'Simulate AI Desk Return';
+            } else {
+                state.status = 'studying';
+                state.autoPausedByAI = false;
+
+                // Visual state: Active Studying Screen
+                els.statusBadgeText.textContent = 'Studying ✅';
+                els.statusBadge.classList.remove('border-border', 'text-textSecondary');
+                els.statusBadge.classList.add('border-accent', 'text-textPrimary');
+
+                // Crisp high-contrast timer
+                els.timerDisplay.classList.remove('text-textMuted', 'opacity-50');
+                els.timerDisplay.classList.add('text-textPrimary');
+
+                // Hide auto-pause subtext
+                els.autoPauseSubtext.classList.add('invisible');
+
+                // Update Resume Button back to Pause
+                els.btnPauseLabel.textContent = 'Pause';
+                els.iconResume.classList.add('hidden');
+                els.iconPause.classList.remove('hidden');
+
+                // Sensor indicator
+                els.sensorDot.classList.remove('bg-textMuted');
+                els.sensorDot.classList.add('bg-accent');
+                els.btnSimulateAway.textContent = 'Simulate AI Desk Departure';
+            }
+        }
+
+        function stopSession() {
+            clearInterval(state.timerInterval);
+            state.timerInterval = null;
+            stopCameraSensor();
+
+            const completed = {
+                id: 'sess-' + Date.now(),
+                name: state.sessionName,
+                date: formatDateISO(new Date()),
+                durationSeconds: state.elapsedSeconds,
+                pauses: state.pauseCount
+            };
+
+            state.lastCompletedSession = completed;
+            state.sessions.unshift(completed);
+            saveSessions();
+
+            // Populate Session End Screen
+            els.summaryName.textContent = completed.name;
+            els.summaryDate.textContent = completed.date;
+            els.summaryPauses.textContent = String(completed.pauses);
+            els.summaryDuration.textContent = formatHHMMSS(completed.durationSeconds);
+
+            state.status = 'idle';
+            navigateTo('end');
+        }
+
+        // --- 8. STATS RENDERING ---
+        function renderStatsScreen() {
+            const todayISO = formatDateISO(new Date());
+            let todaySeconds = 0;
+            let allTimeSeconds = 0;
+
+            state.sessions.forEach(s => {
+                allTimeSeconds += s.durationSeconds;
+                if (s.date === todayISO) {
+                    todaySeconds += s.durationSeconds;
+                }
+            });
+
+            els.statsTodayTotal.textContent = formatHoursMinutes(todaySeconds);
+            els.statsAlltimeTotal.textContent = formatHoursMinutes(allTimeSeconds);
+
+            // Render clean table rows: Name | Date | Duration | Pauses
+            els.historyTableBody.innerHTML = '';
+
+            if (state.sessions.length === 0) {
+                els.historyTableBody.innerHTML = `
+                    <div class="p-6 text-center text-xs text-textMuted">
+                        No sessions recorded yet. Start a focus block from the Timer tab.
+                    </div>
+                `;
+                return;
+            }
+
+            state.sessions.forEach(session => {
+                const row = document.createElement('div');
+                row.className = 'grid grid-cols-12 gap-2 px-3.5 py-3 items-center text-xs hover:bg-neutral-900/60 transition-colors';
+                row.innerHTML = `
+                    <div class="col-span-5 font-medium text-textPrimary truncate" title="${escapeHTML(session.name)}">
+                        ${escapeHTML(session.name)}
+                    </div>
+                    <div class="col-span-3 text-textSecondary tabular-nums text-[11px]">
+                        ${formatShortDate(session.date)}
+                    </div>
+                    <div class="col-span-3 text-right font-mono text-textPrimary tabular-nums text-[11px]">
+                        ${formatCompactDuration(session.durationSeconds)}
+                    </div>
+                    <div class="col-span-1 text-right font-mono text-textSecondary tabular-nums text-[11px]">
+                        ${session.pauses}
+                    </div>
+                `;
+                els.historyTableBody.appendChild(row);
+            });
+        }
+
+        function escapeHTML(str) {
+            return str.replace(/[&<>'"]/g, tag => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                "'": '&#39;',
+                '"': '&quot;'
+            }[tag]));
+        }
+
+        // --- 9. CSV & APP DOWNLOAD FUNCTIONS ---
+        function downloadCSV(sessionsArray, filename) {
+            const headers = ['Session Name', 'Date', 'Duration (HH:MM:SS)', 'Duration (Seconds)', 'Pause Count'];
+            const rows = sessionsArray.map(s => [
+                `"${s.name.replace(/"/g, '""')}"`,
+                s.date,
+                formatHHMMSS(s.durationSeconds),
+                s.durationSeconds,
+                s.pauses
+            ]);
+
+            const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', filename);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            showToast(`Exported ${filename}`);
+        }
+
+        function downloadAppFile() {
+            const htmlContent = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+            const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', 'flow-ai-study-tracker.html');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            showToast('Downloaded flow-ai-study-tracker.html');
+        }
+
+        // --- 10. EVENT LISTENERS ---
+        els.sessionInput.addEventListener('input', () => {
+            els.charCount.textContent = `${els.sessionInput.value.length}/60`;
+        });
+
+        els.sessionInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                startSession();
+            }
+        });
+
+        els.presetBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                els.sessionInput.value = btn.textContent.trim();
+                els.charCount.textContent = `${els.sessionInput.value.length}/60`;
+                els.sessionInput.focus();
+            });
+        });
+
+        els.btnStart.addEventListener('click', startSession);
+
+        els.btnTogglePause.addEventListener('click', () => {
+            if (state.status === 'studying') {
+                setTimerStatus('away', false);
+            } else {
+                setTimerStatus('studying', false);
+            }
+        });
+
+        els.btnSimulateAway.addEventListener('click', () => {
+            if (state.status === 'studying') {
+                setTimerStatus('away', true);
+            } else {
+                setTimerStatus('studying', false);
+            }
+        });
+
+        els.btnStop.addEventListener('click', stopSession);
+
+        els.btnExportSingleCsv.addEventListener('click', () => {
+            if (state.lastCompletedSession) {
+                const safeSlug = state.lastCompletedSession.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+                downloadCSV([state.lastCompletedSession], `flow-${safeSlug}-${state.lastCompletedSession.date}.csv`);
+            }
+        });
+
+        els.btnExportAllCsv.addEventListener('click', () => {
+            if (state.sessions.length === 0) {
+                showToast('No sessions to export');
+                return;
+            }
+            downloadCSV(state.sessions, `flow-all-sessions-${formatDateISO(new Date())}.csv`);
+        });
+
+        els.btnBackHome.addEventListener('click', () => {
+            els.sessionInput.value = '';
+            els.charCount.textContent = '0/60';
+            navigateTo('home');
+        });
+
+        els.navHome.addEventListener('click', () => {
+            if (state.status === 'idle') {
+                navigateTo('home');
+            }
+        });
+
+        els.navStats.addEventListener('click', () => {
+            if (state.status === 'idle') {
+                navigateTo('stats');
+            }
+        });
+
+        els.btnDownloadApp.addEventListener('click', downloadAppFile);
+
+        // --- 11. INITIALIZE APP ---
+        loadSessions();
+        navigateTo('home');
+    </script>
+</body>
+</html>

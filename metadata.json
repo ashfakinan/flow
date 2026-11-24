@@ -1,0 +1,6 @@
+{
+  "name": "Flow — AI Study Tracker",
+  "description": "Mobile-first PWA AI study tracker with active presence detection, timer, stats, and CSV export.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
