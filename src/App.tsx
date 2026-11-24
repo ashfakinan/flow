@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Square, Timer, BarChart3, Settings, Download, ArrowLeft, Video } from 'lucide-react';
+import { Play, Pause, Square, Timer, BarChart3, Settings, Download, ArrowLeft, Video, SwitchCamera } from 'lucide-react';
 import { FaceDetector, FilesetResolver } from '@mediapipe/tasks-vision';
 
 interface StudySession {
@@ -55,6 +55,7 @@ export default function App() {
   
   // Settings State
   const [awayTimeout, setAwayTimeout] = useState<number>(10); // 5, 10, or 30 seconds
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
 
   // Camera & AI Presence State
   const [cameraActive, setCameraActive] = useState(false);
@@ -208,11 +209,21 @@ export default function App() {
     }
   };
 
+  const toggleFacingMode = () => {
+    const next = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(next);
+    stopCamera();
+    setTimeout(() => {
+      startCamera();
+    }, 150);
+    showToast(`Switched to ${next === 'user' ? 'Front' : 'Back'} Camera`);
+  };
+
   const startCamera = async () => {
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: facingMode },
           audio: false,
         });
         mediaStreamRef.current = stream;
@@ -626,12 +637,19 @@ export default function App() {
                   : 'border border-[#525252]'
               }`}
             >
+              <button
+                onClick={toggleFacingMode}
+                title="Switch Camera (Front/Back)"
+                className="absolute top-1 right-1 bg-[#0D0D0D]/90 hover:bg-[#FF4F00] text-[#F5F5F5] p-1 rounded-[2px] border border-[#262626] transition-colors z-10 cursor-pointer"
+              >
+                <SwitchCamera className="w-3 h-3" />
+              </button>
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 muted
-                className={`w-full h-full object-cover scale-x-[-1] ${cameraError ? 'hidden' : ''}`}
+                className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''} ${cameraError ? 'hidden' : ''}`}
               />
               {cameraError && (
                 <div className="w-full h-full flex flex-col items-center justify-center p-1 text-center bg-[#141414]">
