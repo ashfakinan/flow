@@ -4,51 +4,64 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Square, Timer, BarChart3, Settings, Download, ArrowLeft, Video, SwitchCamera } from 'lucide-react';
+import { Play, Pause, Square, Timer, BarChart3, Settings, Download, ArrowLeft, Video, SwitchCamera, LogIn, LogOut, CheckCircle2 } from 'lucide-react';
 import { FaceDetector, FilesetResolver } from '@mediapipe/tasks-vision';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from 'firebase/auth';
+import { getFirestore, collection, doc, setDoc, getDocs, query, orderBy, onSnapshot } from 'firebase/firestore';
+import firebaseConfig from '../firebase-applet-config.json';
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const auth = getAuth(app);
 
 interface StudySession {
   id: string;
+  userId: string;
   name: string;
   date: string; // YYYY-MM-DD
   durationSeconds: number;
+  breakDurationSeconds: number;
   pauses: number;
 }
 
-const STORAGE_KEY = 'flow_study_tracker_sessions_v2';
+const STORAGE_KEY = 'flow_study_tracker_sessions_v3';
 const TIMEOUT_KEY = 'flow_study_tracker_timeout';
 
 const DEFAULT_SESSIONS: StudySession[] = [
   {
     id: 'seed-1',
+    userId: 'local',
     name: 'Cardiovascular Pathology',
     date: new Date().toISOString().split('T')[0],
     durationSeconds: 3300,
+    breakDurationSeconds: 180,
     pauses: 1,
   },
   {
     id: 'seed-2',
+    userId: 'local',
     name: 'Renal Physiology Review',
     date: new Date(Date.now() - 86400000).toISOString().split('T')[0],
     durationSeconds: 5400,
+    breakDurationSeconds: 300,
     pauses: 2,
-  },
-  {
-    id: 'seed-3',
-    name: 'Autonomic Pharmacology',
-    date: new Date(Date.now() - 86400000).toISOString().split('T')[0],
-    durationSeconds: 2700,
-    pauses: 0,
   },
 ];
 
 export default function App() {
+  // Auth State
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
   // Navigation: 'home' | 'active' | 'paused' | 'end' | 'stats' | 'settings'
   const [currentScreen, setCurrentScreen] = useState<'home' | 'active' | 'paused' | 'end' | 'stats' | 'settings'>('home');
   
   // Session State
   const [sessionName, setSessionName] = useState('');
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [breakDurationSeconds, setBreakDurationSeconds] = useState(0);
   const [pauseCount, setPauseCount] = useState(0);
   const [sessions, setSessions] = useState<StudySession[]>([]);
   const [lastCompletedSession, setLastCompletedSession] = useState<StudySession | null>(null);
@@ -63,6 +76,7 @@ export default function App() {
   const [aiReady, setAiReady] = useState(false);
   const [faceDetected, setFaceDetected] = useState(true);
   const [awayCountdown, setAwayCountdown] = useState<number | null>(null);
+  const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
   const [pauseReason, setPauseReason] = useState<'auto' | 'manual'>('auto');
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -71,7 +85,7 @@ export default function App() {
   const detectionIntervalRef = useRef<number | null>(null);
   const lastSeenAtRef = useRef<number>(Date.now());
   const lastVideoTimeRef = useRef<number>(0);
-  const returnDetectionsRef = useRef<number>(0);
+  const returnSecondsCountRef = useRef<number>(0);
 
   const currentScreenRef = useRef(currentScreen);
   currentScreenRef.current = currentScreen;
@@ -85,8 +99,37 @@ export default function App() {
   // Toast notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Load initial sessions & settings
+  // Auth listener
   useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch sessions from Firestore when user logs in, or fallback to localStorage
+  useEffect(() => {
+    if (user) {
+      const q = query(collection(db, 'users', user.uid, 'sessions'));
+      const unsub = onSnapshot(q, (snapshot) => {
+        const cloudSessions: StudySession[] = [];
+        snapshot.forEach((docSnap) => {
+          cloudSessions.push(docSnap.data() as StudySession);
+        });
+        cloudSessions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setSessions(cloudSessions);
+      }, (err) => {
+        console.warn('Firestore sync error:', err);
+        loadLocalSessions();
+      });
+      return () => unsub();
+    } else {
+      loadLocalSessions();
+    }
+  }, [user]);
+
+  const loadLocalSessions = () => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -95,22 +138,38 @@ export default function App() {
         setSessions(DEFAULT_SESSIONS);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_SESSIONS));
       }
-      const savedTimeout = localStorage.getItem(TIMEOUT_KEY);
-      if (savedTimeout) {
-        setAwayTimeout(Number(savedTimeout));
-      }
     } catch (e) {
-      console.error('Failed to load storage:', e);
+      console.error('Failed to load local storage:', e);
       setSessions(DEFAULT_SESSIONS);
+    }
+  };
+
+  // Load timeout setting
+  useEffect(() => {
+    const savedTimeout = localStorage.getItem(TIMEOUT_KEY);
+    if (savedTimeout) {
+      setAwayTimeout(Number(savedTimeout));
     }
   }, []);
 
-  const saveSessionsToStorage = (newSessions: StudySession[]) => {
-    setSessions(newSessions);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newSessions));
-    } catch (e) {
-      console.error('Failed to save sessions:', e);
+  const saveSessionToCloudOrLocal = async (newSession: StudySession) => {
+    const updated = [newSession, ...sessions];
+    setSessions(updated);
+
+    if (user) {
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'sessions', newSession.id), newSession);
+        showToast('Session synced to Firebase');
+      } catch (err) {
+        console.error('Failed to save session to Firestore:', err);
+        showToast('Saved locally (Cloud sync failed)');
+      }
+    } else {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      } catch (e) {
+        console.error('Failed to save local session:', e);
+      }
     }
   };
 
@@ -118,10 +177,10 @@ export default function App() {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage(null);
-    }, 2500);
+    }, 2800);
   };
 
-  // Timer Tick
+  // Timer Tick (Active Session)
   useEffect(() => {
     let interval: number | null = null;
     if (currentScreen === 'active') {
@@ -134,16 +193,30 @@ export default function App() {
     };
   }, [currentScreen]);
 
-  // Reset grace timer whenever returning to active screen
+  // Break Duration Tick (Paused Session)
+  useEffect(() => {
+    let interval: number | null = null;
+    if (currentScreen === 'paused') {
+      interval = window.setInterval(() => {
+        setBreakDurationSeconds((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [currentScreen]);
+
+  // Reset grace timers whenever returning to active screen
   useEffect(() => {
     if (currentScreen === 'active') {
       lastSeenAtRef.current = Date.now();
-      returnDetectionsRef.current = 0;
+      returnSecondsCountRef.current = 0;
       setAwayCountdown(null);
+      setReturnCountdown(null);
     }
   }, [currentScreen]);
 
-  // Camera & AI Face Detection lifecycle (persists across active <-> paused)
+  // Camera & AI Face Detection lifecycle
   const isSessionRunning = currentScreen === 'active' || currentScreen === 'paused';
 
   useEffect(() => {
@@ -155,7 +228,7 @@ export default function App() {
     return () => {
       stopCamera();
     };
-  }, [isSessionRunning]);
+  }, [isSessionRunning, facingMode]);
 
   const initFaceDetector = async (): Promise<FaceDetector | null> => {
     if (faceDetectorRef.current) return faceDetectorRef.current;
@@ -258,6 +331,7 @@ export default function App() {
     }
     setCameraActive(false);
     setAwayCountdown(null);
+    setReturnCountdown(null);
   };
 
   const startFacePresenceLoop = () => {
@@ -265,7 +339,7 @@ export default function App() {
       clearInterval(detectionIntervalRef.current);
     }
     lastSeenAtRef.current = Date.now();
-    returnDetectionsRef.current = 0;
+    returnSecondsCountRef.current = 0;
 
     detectionIntervalRef.current = window.setInterval(() => {
       const video = videoRef.current;
@@ -309,29 +383,36 @@ export default function App() {
         } else if (screen === 'paused') {
           if (pauseReasonRef.current === 'auto') {
             if (isPersonPresent) {
-              returnDetectionsRef.current += 1;
-              if (returnDetectionsRef.current >= 2) {
-                returnDetectionsRef.current = 0;
+              returnSecondsCountRef.current += 1;
+              const remainingReturnSec = Math.max(0, 5 - returnSecondsCountRef.current);
+              setReturnCountdown(remainingReturnSec);
+
+              // Must stay in camera for 5 consecutive seconds to resume
+              if (returnSecondsCountRef.current >= 5) {
+                returnSecondsCountRef.current = 0;
+                setReturnCountdown(null);
                 lastSeenAtRef.current = Date.now();
                 setAwayCountdown(null);
                 setCurrentScreen('active');
-                showToast('AI Sensor: Welcome back! Auto-resumed.');
+                showToast('AI Sensor: 5s presence confirmed. Resumed.');
               }
             } else {
-              returnDetectionsRef.current = 0;
+              returnSecondsCountRef.current = 0;
+              setReturnCountdown(null);
             }
           }
         }
       } catch (err) {
         console.warn('Face detection frame skipped:', err);
       }
-    }, 400);
+    }, 1000); // 1-second interval tick for robust 5-second countdown
   };
 
   const handleAutoPause = () => {
     setPauseReason('auto');
     setAwayCountdown(null);
-    returnDetectionsRef.current = 0;
+    returnSecondsCountRef.current = 0;
+    setReturnCountdown(null);
     setPauseCount((prev) => prev + 1);
     setCurrentScreen('paused');
     showToast('AI Sensor: Away detected. Paused.');
@@ -341,9 +422,11 @@ export default function App() {
     const title = sessionName.trim() || 'Focused Study Block';
     setSessionName(title);
     setElapsedSeconds(0);
+    setBreakDurationSeconds(0);
     setPauseCount(0);
     setPauseReason('auto');
     setAwayCountdown(null);
+    setReturnCountdown(null);
     setFaceDetected(true);
     lastSeenAtRef.current = Date.now();
     setCurrentScreen('active');
@@ -353,12 +436,14 @@ export default function App() {
     if (currentScreen === 'active') {
       setPauseReason('manual');
       setAwayCountdown(null);
+      setReturnCountdown(null);
       setPauseCount((prev) => prev + 1);
       setCurrentScreen('paused');
     } else if (currentScreen === 'paused') {
       lastSeenAtRef.current = Date.now();
-      returnDetectionsRef.current = 0;
+      returnSecondsCountRef.current = 0;
       setAwayCountdown(null);
+      setReturnCountdown(null);
       setCurrentScreen('active');
     }
   };
@@ -366,16 +451,37 @@ export default function App() {
   const handleStopSession = () => {
     const newSession: StudySession = {
       id: 'sess-' + Date.now(),
+      userId: user ? user.uid : 'local',
       name: sessionName || 'Study Session',
       date: new Date().toISOString().split('T')[0],
       durationSeconds: elapsedSeconds,
+      breakDurationSeconds: breakDurationSeconds,
       pauses: pauseCount,
     };
 
     setLastCompletedSession(newSession);
-    const updated = [newSession, ...sessions];
-    saveSessionsToStorage(updated);
+    saveSessionToCloudOrLocal(newSession);
     setCurrentScreen('end');
+  };
+
+  const handleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+      showToast('Signed in successfully');
+    } catch (err) {
+      console.error('Google Sign-In failed:', err);
+      showToast('Sign-in failed. Please try again.');
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      showToast('Signed out');
+    } catch (err) {
+      console.error('Sign out failed:', err);
+    }
   };
 
   const handleExportCSV = (sessionToExport?: StudySession) => {
@@ -385,12 +491,12 @@ export default function App() {
       return;
     }
 
-    const headers = ['Session Name', 'Date', 'Duration (HH:MM:SS)', 'Duration (Seconds)', 'Pause Count'];
+    const headers = ['Session Name', 'Date', 'Duration (HH:MM:SS)', 'Break (HH:MM:SS)', 'Pause Count'];
     const rows = list.map((s) => [
       `"${s.name.replace(/"/g, '""')}"`,
       s.date,
       formatHHMMSS(s.durationSeconds),
-      s.durationSeconds,
+      formatHHMMSS(s.breakDurationSeconds),
       s.pauses,
     ]);
 
@@ -452,18 +558,39 @@ export default function App() {
         ========================================================== */}
         {currentScreen === 'home' && (
           <div className="flex-1 flex flex-col justify-between p-6">
-            <header className="flex items-center justify-between h-12 border-b border-[#262626] pb-3 mb-6">
+            <header className="flex items-center justify-between h-12 border-b border-[#262626] pb-3 mb-4">
               <div className="flex items-center gap-2">
                 <div className="w-2.5 h-2.5 bg-[#FF4F00]"></div>
                 <span className="font-bold text-lg tracking-tight text-[#F5F5F5] font-mono">Flow</span>
               </div>
-              <button
-                onClick={() => setCurrentScreen('settings')}
-                className="text-[#8A8A8A] hover:text-[#F5F5F5] p-1 transition-colors"
-                aria-label="Settings"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {user ? (
+                  <button
+                    onClick={handleLogout}
+                    title="Sign Out"
+                    className="flex items-center gap-1.5 text-xs text-[#8A8A8A] hover:text-[#F5F5F5] bg-[#141414] border border-[#262626] px-2.5 py-1 rounded-[4px] font-mono transition-colors"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span className="truncate max-w-[80px]">{user.displayName || 'Account'}</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleLogin}
+                    title="Sign In with Google"
+                    className="flex items-center gap-1.5 text-xs text-white bg-[#FF4F00] hover:bg-[#E04600] px-3 py-1 rounded-[4px] font-mono font-medium transition-colors cursor-pointer"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>Login</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setCurrentScreen('settings')}
+                  className="text-[#8A8A8A] hover:text-[#F5F5F5] p-1 transition-colors"
+                  aria-label="Settings"
+                >
+                  <Settings className="w-5 h-5" />
+                </button>
+              </div>
             </header>
 
             <div className="space-y-6 my-auto">
@@ -482,7 +609,7 @@ export default function App() {
                   value={sessionName}
                   onChange={(e) => setSessionName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleStartSession()}
-                  placeholder="e.g. Anatomy — Ch. 4"
+                  placeholder="e.g. Physics — Chapter 3"
                   maxLength={50}
                   className="w-full bg-[#141414] border border-[#262626] focus:border-[#FF4F00] focus:outline-none text-[#F5F5F5] px-4 py-3.5 text-sm rounded-[4px] transition-colors"
                   autoFocus
@@ -538,20 +665,25 @@ export default function App() {
         {(currentScreen === 'active' || currentScreen === 'paused') && (
           <div className="flex-1 flex flex-col justify-between p-6 relative">
             <header className="flex items-center justify-between h-12 border-b border-[#262626] pb-3">
-              <div className="text-xs text-[#8A8A8A] font-mono truncate max-w-[260px]">
+              <div className="text-xs text-[#8A8A8A] font-mono truncate max-w-[200px]">
                 {sessionName || 'Untitled Session'}
               </div>
-              {currentScreen === 'active' ? (
-                <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-[#141414] border border-[#FF4F00] text-[11px] font-mono text-[#F5F5F5] rounded-[4px]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#FF4F00] animate-pulse"></span>
-                  Studying ✅
-                </div>
-              ) : (
-                <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-[#141414] border border-[#262626] text-[11px] font-mono text-[#8A8A8A] rounded-[4px]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#8A8A8A]"></span>
-                  Away ⏸️
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-[#8A8A8A]">
+                  Break: {formatHHMMSS(breakDurationSeconds)}
+                </span>
+                {currentScreen === 'active' ? (
+                  <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-[#141414] border border-[#FF4F00] text-[11px] font-mono text-[#F5F5F5] rounded-[4px]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#FF4F00] animate-pulse"></span>
+                    Studying ✅
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-[#141414] border border-[#262626] text-[11px] font-mono text-[#8A8A8A] rounded-[4px]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#8A8A8A]"></span>
+                    Away ⏸️
+                  </div>
+                )}
+              </div>
             </header>
 
             <div className="flex flex-col items-center justify-center my-auto">
@@ -574,8 +706,12 @@ export default function App() {
                     : 'Scanning for presence...'}
                 </p>
               ) : (
-                <p className="text-xs font-mono text-[#8A8A8A] tracking-wider">
-                  {pauseReason === 'auto' ? 'Resume when you return' : 'Paused manually'}
+                <p className="text-xs font-mono text-[#FF4F00] font-medium tracking-wider">
+                  {pauseReason === 'auto'
+                    ? returnCountdown !== null
+                      ? `Stay in camera: Resuming in ${returnCountdown}s...`
+                      : 'Step in front of camera for 5s to resume'
+                    : 'Paused manually'}
                 </p>
               )}
             </div>
@@ -631,7 +767,7 @@ export default function App() {
             <div
               className={`absolute bottom-6 right-6 w-28 h-20 bg-[#141414] rounded-[4px] overflow-hidden flex flex-col justify-between z-20 transition-opacity ${
                 currentScreen === 'paused'
-                  ? 'border border-[#262626] opacity-60'
+                  ? 'border border-[#262626] opacity-80'
                   : faceDetected
                   ? 'border border-[#FF4F00]'
                   : 'border border-[#525252]'
@@ -668,7 +804,7 @@ export default function App() {
                   }`}
                 ></span>
                 <span className={currentScreen === 'paused' ? 'text-[#8A8A8A]' : 'text-[#F5F5F5]'}>
-                  {currentScreen === 'paused' ? 'AWAY' : faceDetected ? 'CAM' : 'SCAN'}
+                  {currentScreen === 'paused' ? (returnCountdown !== null ? `${returnCountdown}s` : 'AWAY') : faceDetected ? 'CAM' : 'SCAN'}
                 </span>
               </div>
             </div>
@@ -705,6 +841,21 @@ export default function App() {
 
                   <div className="grid grid-cols-2 gap-4 border-b border-[#262626] pb-3">
                     <div>
+                      <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A8A8A] mb-1">Total Duration</span>
+                      <p className="font-mono text-base font-semibold text-[#F5F5F5]">
+                        {formatHHMMSS(lastCompletedSession?.durationSeconds ?? elapsedSeconds)}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A8A8A] mb-1">Break Time</span>
+                      <p className="font-mono text-base font-semibold text-[#FF4F00]">
+                        {formatHHMMSS(lastCompletedSession?.breakDurationSeconds ?? breakDurationSeconds)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
                       <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A8A8A] mb-1">Date</span>
                       <p className="text-xs font-mono text-[#F5F5F5]">
                         {lastCompletedSession?.date ? formatShortDate(lastCompletedSession.date) : 'Today'}
@@ -716,13 +867,6 @@ export default function App() {
                         {lastCompletedSession?.pauses ?? pauseCount}
                       </p>
                     </div>
-                  </div>
-
-                  <div>
-                    <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A8A8A] mb-1">Total Duration</span>
-                    <p className="font-mono text-3xl font-bold text-[#FF4F00]">
-                      {formatHHMMSS(lastCompletedSession?.durationSeconds ?? elapsedSeconds)}
-                    </p>
                   </div>
                 </div>
               </div>
@@ -740,6 +884,7 @@ export default function App() {
                 onClick={() => {
                   setSessionName('');
                   setElapsedSeconds(0);
+                  setBreakDurationSeconds(0);
                   setPauseCount(0);
                   setCurrentScreen('home');
                 }}
@@ -789,31 +934,32 @@ export default function App() {
             </div>
 
             <div className="flex-1 border border-[#262626] bg-[#141414] rounded-[4px] overflow-hidden flex flex-col">
-              <div className="grid grid-cols-12 gap-2 px-3.5 py-2.5 border-b border-[#262626] bg-[#0D0D0D] text-[10px] font-mono uppercase tracking-wider text-[#8A8A8A]">
-                <div className="col-span-5">Name</div>
+              <div className="grid grid-cols-12 gap-2 px-3 py-2.5 border-b border-[#262626] bg-[#0D0D0D] text-[10px] font-mono uppercase tracking-wider text-[#8A8A8A]">
+                <div className="col-span-4">Name</div>
                 <div className="col-span-3">Date</div>
-                <div className="col-span-3 text-right">Duration</div>
-                <div className="col-span-1 text-right">P</div>
+                <div className="col-span-3 text-right">Study / Break</div>
+                <div className="col-span-2 text-right">P</div>
               </div>
 
-              <div className="divide-y divide-[#262626] overflow-y-auto max-h-[320px]">
+              <div className="divide-y divide-[#262626] overflow-y-auto max-h-[300px]">
                 {sessions.length === 0 ? (
                   <div className="p-8 text-center text-xs text-[#525252]">
                     No study sessions recorded yet.
                   </div>
                 ) : (
                   sessions.map((s) => (
-                    <div key={s.id} className="grid grid-cols-12 gap-2 px-3.5 py-3 items-center text-xs hover:bg-[#1C1C1C] transition-colors">
-                      <div className="col-span-5 font-medium text-[#F5F5F5] truncate" title={s.name}>
+                    <div key={s.id} className="grid grid-cols-12 gap-2 px-3 py-3 items-center text-xs hover:bg-[#1C1C1C] transition-colors">
+                      <div className="col-span-4 font-medium text-[#F5F5F5] truncate" title={s.name}>
                         {s.name}
                       </div>
-                      <div className="col-span-3 text-[#8A8A8A] font-mono text-[11px]">
+                      <div className="col-span-3 text-[#8A8A8A] font-mono text-[10px]">
                         {formatShortDate(s.date)}
                       </div>
-                      <div className="col-span-3 text-right font-mono text-[#F5F5F5] text-[11px]">
-                        {formatHoursMinutes(s.durationSeconds)}
+                      <div className="col-span-3 text-right font-mono text-[#F5F5F5] text-[10px]">
+                        <div>{formatHoursMinutes(s.durationSeconds)}</div>
+                        <div className="text-[#FF4F00]">Brk: {Math.round(s.breakDurationSeconds / 60)}m</div>
                       </div>
-                      <div className="col-span-1 text-right font-mono text-[#8A8A8A] text-[11px]">
+                      <div className="col-span-2 text-right font-mono text-[#8A8A8A] text-[10px]">
                         {s.pauses}
                       </div>
                     </div>
@@ -844,6 +990,32 @@ export default function App() {
 
             <div className="space-y-6">
               <div className="bg-[#141414] border border-[#262626] p-5 rounded-[4px]">
+                <h3 className="text-xs font-mono uppercase tracking-widest text-[#8A8A8A] mb-2">Firebase Account</h3>
+                {user ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-[#F5F5F5] font-mono">Signed in as: <span className="text-[#FF4F00]">{user.email}</span></p>
+                    <button
+                      onClick={handleLogout}
+                      className="bg-[#0D0D0D] hover:bg-[#1C1C1C] border border-[#262626] text-[#F5F5F5] px-4 py-2 text-xs font-mono rounded-[4px] transition-colors"
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-[#8A8A8A] mb-2">Sign in with Google to sync your study blocks across all your devices.</p>
+                    <button
+                      onClick={handleLogin}
+                      className="bg-[#FF4F00] hover:bg-[#E04600] text-white px-4 py-2.5 text-xs font-mono font-medium rounded-[4px] flex items-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <LogIn className="w-4 h-4" />
+                      <span>Sign In with Google</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-[#141414] border border-[#262626] p-5 rounded-[4px]">
                 <h3 className="text-xs font-mono uppercase tracking-widest text-[#8A8A8A] mb-2">AI Presence Sensor</h3>
                 <label className="block text-sm font-medium text-[#F5F5F5] mb-1">
                   Away Timeout
@@ -872,25 +1044,6 @@ export default function App() {
                     </button>
                   ))}
                 </div>
-              </div>
-
-              <div className="bg-[#141414] border border-[#262626] p-5 rounded-[4px]">
-                <h3 className="text-xs font-mono uppercase tracking-widest text-[#8A8A8A] mb-2">Data &amp; Storage</h3>
-                <p className="text-xs text-[#8A8A8A] mb-4">
-                  All session history is stored locally on your device in localStorage.
-                </p>
-                <button
-                  onClick={() => {
-                    if (window.confirm('Clear all study session history?')) {
-                      setSessions([]);
-                      localStorage.removeItem(STORAGE_KEY);
-                      showToast('History cleared');
-                    }
-                  }}
-                  className="text-xs text-[#FF4F00] hover:underline font-mono"
-                >
-                  Clear All History Data
-                </button>
               </div>
             </div>
           </div>

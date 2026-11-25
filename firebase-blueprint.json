@@ -1,0 +1,25 @@
+{
+  "entities": {
+    "Session": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "date": { "type": "string", "maxLength": 32 },
+        "durationSeconds": { "type": "number" },
+        "breakDurationSeconds": { "type": "number" },
+        "pauses": { "type": "number" }
+      },
+      "required": ["id", "userId", "name", "date", "durationSeconds", "breakDurationSeconds", "pauses"]
+    }
+  },
+  "firestore": {
+    "paths": {
+      "/users/{userId}/sessions/{sessionId}": {
+        "schema": "Session",
+        "description": "User study sessions stored per user"
+      }
+    }
+  }
+}
