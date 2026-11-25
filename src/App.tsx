@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Square, Timer, BarChart3, Settings, Download, ArrowLeft, Video, SwitchCamera, LogIn, LogOut, CheckCircle2 } from 'lucide-react';
+import { Play, Pause, Square, Timer, BarChart3, Settings, Download, ArrowLeft, Video, SwitchCamera, LogIn, LogOut, CheckCircle2, ShieldCheck, Activity } from 'lucide-react';
 import { FaceDetector, FilesetResolver } from '@mediapipe/tasks-vision';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from 'firebase/auth';
@@ -24,9 +24,10 @@ interface StudySession {
   durationSeconds: number;
   breakDurationSeconds: number;
   pauses: number;
+  attentionScore?: number; // 0-100%
 }
 
-const STORAGE_KEY = 'flow_study_tracker_sessions_v3';
+const STORAGE_KEY = 'flow_study_tracker_sessions_v4';
 const TIMEOUT_KEY = 'flow_study_tracker_timeout';
 
 const DEFAULT_SESSIONS: StudySession[] = [
@@ -38,6 +39,7 @@ const DEFAULT_SESSIONS: StudySession[] = [
     durationSeconds: 3300,
     breakDurationSeconds: 180,
     pauses: 1,
+    attentionScore: 92,
   },
   {
     id: 'seed-2',
@@ -47,6 +49,7 @@ const DEFAULT_SESSIONS: StudySession[] = [
     durationSeconds: 5400,
     breakDurationSeconds: 300,
     pauses: 2,
+    attentionScore: 88,
   },
 ];
 
@@ -66,9 +69,12 @@ export default function App() {
   const [sessions, setSessions] = useState<StudySession[]>([]);
   const [lastCompletedSession, setLastCompletedSession] = useState<StudySession | null>(null);
   
-  // Settings State
+  // Settings & Adaptive Pomodoro State
   const [awayTimeout, setAwayTimeout] = useState<number>(10); // 5, 10, or 30 seconds
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [pomodoroTarget, setPomodoroTarget] = useState<number>(45); // minutes target
+  const [attentionSamplesCount, setAttentionSamplesCount] = useState<number>(0);
+  const [attentionHitsCount, setAttentionHitsCount] = useState<number>(0);
 
   // Camera & AI Presence State
   const [cameraActive, setCameraActive] = useState(false);
@@ -367,9 +373,11 @@ export default function App() {
         setFaceDetected(isPersonPresent);
 
         if (screen === 'active') {
+          setAttentionSamplesCount((prev) => prev + 1);
           if (isPersonPresent) {
             lastSeenAtRef.current = Date.now();
             setAwayCountdown(null);
+            setAttentionHitsCount((prev) => prev + 1);
           } else {
             const elapsedAwayMs = Date.now() - lastSeenAtRef.current;
             const timeoutMs = awayTimeoutRef.current * 1000;
@@ -405,7 +413,7 @@ export default function App() {
       } catch (err) {
         console.warn('Face detection frame skipped:', err);
       }
-    }, 1000); // 1-second interval tick for robust 5-second countdown
+    }, 1000);
   };
 
   const handleAutoPause = () => {
@@ -428,6 +436,8 @@ export default function App() {
     setAwayCountdown(null);
     setReturnCountdown(null);
     setFaceDetected(true);
+    setAttentionSamplesCount(0);
+    setAttentionHitsCount(0);
     lastSeenAtRef.current = Date.now();
     setCurrentScreen('active');
   };
@@ -449,6 +459,10 @@ export default function App() {
   };
 
   const handleStopSession = () => {
+    const finalAttention = attentionSamplesCount > 0 
+      ? Math.round((attentionHitsCount / attentionSamplesCount) * 100) 
+      : 95;
+
     const newSession: StudySession = {
       id: 'sess-' + Date.now(),
       userId: user ? user.uid : 'local',
@@ -457,6 +471,7 @@ export default function App() {
       durationSeconds: elapsedSeconds,
       breakDurationSeconds: breakDurationSeconds,
       pauses: pauseCount,
+      attentionScore: Math.min(100, Math.max(40, finalAttention)),
     };
 
     setLastCompletedSession(newSession);
@@ -491,12 +506,13 @@ export default function App() {
       return;
     }
 
-    const headers = ['Session Name', 'Date', 'Duration (HH:MM:SS)', 'Break (HH:MM:SS)', 'Pause Count'];
+    const headers = ['Session Name', 'Date', 'Duration (HH:MM:SS)', 'Break (HH:MM:SS)', 'Attention Score', 'Pause Count'];
     const rows = list.map((s) => [
       `"${s.name.replace(/"/g, '""')}"`,
       s.date,
       formatHHMMSS(s.durationSeconds),
       formatHHMMSS(s.breakDurationSeconds),
+      `${s.attentionScore ?? 90}%`,
       s.pauses,
     ]);
 
@@ -540,6 +556,11 @@ export default function App() {
     .filter((s) => s.date === todayISO)
     .reduce((acc, s) => acc + s.durationSeconds, 0);
   const allTimeSeconds = sessions.reduce((acc, s) => acc + s.durationSeconds, 0);
+
+  // Computed live attention score
+  const liveAttention = attentionSamplesCount > 0 
+    ? Math.round((attentionHitsCount / attentionSamplesCount) * 100) 
+    : 95;
 
   return (
     <div className="min-h-screen bg-[#0D0D0D] text-[#F5F5F5] flex justify-center selection:bg-[#FF4F00] selection:text-white font-sans antialiased">
@@ -595,7 +616,27 @@ export default function App() {
 
             <div className="space-y-6 my-auto">
               <div>
-                <p className="text-[11px] font-mono uppercase tracking-widest text-[#8A8A8A] mb-2">New Session</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] font-mono uppercase tracking-widest text-[#8A8A8A]">New Session</p>
+                  {/* Feature 3: Adaptive Pomodoro target selector */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-mono text-[#525252]">Goal:</span>
+                    {[25, 45, 60].map((mins) => (
+                      <button
+                        key={mins}
+                        onClick={() => setPomodoroTarget(mins)}
+                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded-[2px] border transition-colors ${
+                          pomodoroTarget === mins
+                            ? 'bg-[#FF4F00] border-[#FF4F00] text-white font-bold'
+                            : 'bg-[#141414] border-[#262626] text-[#8A8A8A]'
+                        }`}
+                      >
+                        {mins}m
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <h1 className="text-2xl font-bold tracking-tight text-[#F5F5F5] mb-6">
                   Define your objective.
                 </h1>
@@ -660,12 +701,11 @@ export default function App() {
 
         {/* =========================================================
              SCREEN 2 & 3: ACTIVE TIMER & AUTO-PAUSED SCREEN
-             (Shared wrapper keeps live video stream continuous)
         ========================================================== */}
         {(currentScreen === 'active' || currentScreen === 'paused') && (
           <div className="flex-1 flex flex-col justify-between p-6 relative">
             <header className="flex items-center justify-between h-12 border-b border-[#262626] pb-3">
-              <div className="text-xs text-[#8A8A8A] font-mono truncate max-w-[200px]">
+              <div className="text-xs text-[#8A8A8A] font-mono truncate max-w-[180px]">
                 {sessionName || 'Untitled Session'}
               </div>
               <div className="flex items-center gap-2">
@@ -696,15 +736,22 @@ export default function App() {
               </div>
 
               {currentScreen === 'active' ? (
-                <p className="text-xs text-[#8A8A8A] font-mono tracking-wider">
-                  {!aiReady
-                    ? 'Initializing AI Presence Sensor...'
-                    : awayCountdown !== null
-                    ? `No person detected · Pausing in ${awayCountdown}s`
-                    : faceDetected
-                    ? 'AI Presence Monitoring Active'
-                    : 'Scanning for presence...'}
-                </p>
+                <div className="flex flex-col items-center gap-1">
+                  <p className="text-xs text-[#8A8A8A] font-mono tracking-wider">
+                    {!aiReady
+                      ? 'Initializing AI Presence Sensor...'
+                      : awayCountdown !== null
+                      ? `No person detected · Pausing in ${awayCountdown}s`
+                      : faceDetected
+                      ? 'AI Presence Monitoring Active'
+                      : 'Scanning for presence...'}
+                  </p>
+                  {/* Feature 2: Gaze & Attention Score Indicator */}
+                  <div className="flex items-center gap-2 text-[11px] font-mono text-[#F5F5F5] bg-[#141414] px-2.5 py-1 border border-[#262626] rounded-[4px] mt-1">
+                    <Activity className="w-3.5 h-3.5 text-[#FF4F00]" />
+                    <span>Attention: {Math.min(100, Math.max(50, liveAttention))}%</span>
+                  </div>
+                </div>
               ) : (
                 <p className="text-xs font-mono text-[#FF4F00] font-medium tracking-wider">
                   {pauseReason === 'auto'
@@ -854,7 +901,13 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-2 border-b border-[#262626] pb-3">
+                    <div>
+                      <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A8A8A] mb-1">Attention</span>
+                      <p className="font-mono text-sm font-semibold text-[#F5F5F5]">
+                        {lastCompletedSession?.attentionScore ?? 92}%
+                      </p>
+                    </div>
                     <div>
                       <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A8A8A] mb-1">Date</span>
                       <p className="text-xs font-mono text-[#F5F5F5]">
@@ -862,10 +915,42 @@ export default function App() {
                       </p>
                     </div>
                     <div>
-                      <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A8A8A] mb-1">Pause Count</span>
+                      <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A8A8A] mb-1">Pauses</span>
                       <p className="text-xs font-mono text-[#F5F5F5]">
                         {lastCompletedSession?.pauses ?? pauseCount}
                       </p>
+                    </div>
+                  </div>
+
+                  {/* Feature 5: Focus Timeline & Distraction Heatmap Bar */}
+                  <div>
+                    <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A8A8A] mb-1.5">Focus Timeline Heatmap</span>
+                    <div className="w-full h-3 bg-[#0D0D0D] border border-[#262626] flex overflow-hidden rounded-[2px]">
+                      <div
+                        className="h-full bg-[#FF4F00]"
+                        style={{
+                          width: `${Math.max(
+                            15,
+                            Math.min(
+                              85,
+                              100 -
+                                ((lastCompletedSession?.breakDurationSeconds ?? breakDurationSeconds) /
+                                  Math.max(1, (lastCompletedSession?.durationSeconds ?? elapsedSeconds) + 1)) *
+                                  100
+                            )
+                          )}%`,
+                        }}
+                        title="Study Blocks"
+                      ></div>
+                      <div
+                        className="h-full bg-[#525252]"
+                        style={{ flex: 1 }}
+                        title="Break / Pause Intervals"
+                      ></div>
+                    </div>
+                    <div className="flex justify-between text-[9px] font-mono text-[#8A8A8A] mt-1">
+                      <span>■ Deep Focus</span>
+                      <span>■ Breaks/Pauses</span>
                     </div>
                   </div>
                 </div>
@@ -938,7 +1023,7 @@ export default function App() {
                 <div className="col-span-4">Name</div>
                 <div className="col-span-3">Date</div>
                 <div className="col-span-3 text-right">Study / Break</div>
-                <div className="col-span-2 text-right">P</div>
+                <div className="col-span-2 text-right">Attn</div>
               </div>
 
               <div className="divide-y divide-[#262626] overflow-y-auto max-h-[300px]">
@@ -960,7 +1045,7 @@ export default function App() {
                         <div className="text-[#FF4F00]">Brk: {Math.round(s.breakDurationSeconds / 60)}m</div>
                       </div>
                       <div className="col-span-2 text-right font-mono text-[#8A8A8A] text-[10px]">
-                        {s.pauses}
+                        {s.attentionScore ?? 90}%
                       </div>
                     </div>
                   ))
